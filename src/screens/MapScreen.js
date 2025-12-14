@@ -3,7 +3,9 @@ import { View, StyleSheet, Text } from 'react-native';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import { VIANA_COORDS } from '../api/mockApi';
 
-// Define o estilo aqui para evitar chaves de API por enquanto
+
+console.log("MapLibre Status:", MapLibreGL ? "Carregado" : "Falhou");
+
 const MAP_STYLE = "https://demotiles.maplibre.org/style.json";
 
 export default function MapScreen() {

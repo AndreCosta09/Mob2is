@@ -16,7 +16,10 @@ const Tab = createBottomTabNavigator();
 
 function MainTabs() {
   return (
-    <Tab.Navigator tabBar={props => <CustomTabBar {...props} />} screenOptions={{ headerShown: false }}>
+    <Tab.Navigator 
+      // tabBar={props => <CustomTabBar {...props} />}  <-- COMENTA ESTA LINHA
+      screenOptions={{ headerShown: false }}
+    >
       <Tab.Screen name="Explorar" component={MapScreen} options={{ tabBarLabel: 'Explorar' }} />
       <Tab.Screen name="Pesquisar" component={SearchScreen} options={{ tabBarLabel: 'Pesquisar' }} />
       <Tab.Screen name="Mais" component={MoreScreen} options={{ tabBarLabel: 'Mais' }} />
