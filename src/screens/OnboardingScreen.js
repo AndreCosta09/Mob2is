@@ -1,69 +1,88 @@
-import React, { useContext, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
-import { UserContext } from '../context/UserContext';
+import React, { useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 const CONDITIONS = [
-  { id: 'visual', label: 'DEFICIÊNCIA VISUAL', color: '#FF6B6B', icon: '👁️' },
-  { id: 'wheelchair', label: 'CADEIRA DE RODAS', color: '#A2D76B', icon: '♿' },
-  { id: 'hearing', label: 'DEFICIÊNCIA AUDITIVA', color: '#A890F0', icon: '👂' },
-  { id: 'autism', label: 'ESPECTRO DE AUTISMO (PEA)', color: '#FFD764', icon: '🧠' },
-  { id: 'strollers', label: 'GRÁVIDAS, CRIANÇAS E CARRINHOS', color: '#FF7A8A', icon: '🤰' },
-  { id: 'elderly', label: 'IDOSO COM MOBILIDADE CONDICIONADA', color: '#6BCBE1', icon: '👴' },
+  { key: "visual", label: "DEFICIÊNCIA VISUAL", color: "#FF6B57", icon: "👁️" },
+  { key: "wheelchair", label: "CADEIRA DE RODAS", color: "#8BC34A", icon: "♿" },
+  { key: "hearing", label: "DEFICIÊNCIA AUDITIVA", color: "#9C7CF4", icon: "🦻" },
+  { key: "asd", label: "ESPECTRO DE AUTISMO (PEA)", color: "#FFD166", icon: "🧩" },
+  { key: "stroller", label: "GRÁVIDAS, CRIANÇAS E CARRINHOS", color: "#FF4D6D", icon: "👶" },
+  { key: "elder", label: "IDOSO COM MOBILIDADE CONDICIONADA", color: "#4FC3F7", icon: "🧓" },
 ];
 
-export default function OnboardingScreen() {
-  const { saveCondition } = useContext(UserContext);
+export default function OnboardingScreen({ onDone }) {
   const [selected, setSelected] = useState(null);
 
-  const handleStart = () => {
-    if (selected) saveCondition(selected);
-  };
-
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Qual é a sua condição?</Text>
-        </View>
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {CONDITIONS.map((item) => {
-            const isSelected = selected === item.id;
-            return (
-              <TouchableOpacity key={item.id} style={[styles.card, isSelected && { backgroundColor: item.color, borderColor: item.color }]} onPress={() => setSelected(item.id)} activeOpacity={0.9}>
-                <View style={[styles.iconBox, { backgroundColor: item.color }]}>
-                  <Text style={{fontSize: 20}}>{item.icon}</Text>
-                </View>
-                <Text style={[styles.label, isSelected && styles.selectedLabel]}>{item.label}</Text>
-                <View style={[styles.radio, isSelected && { borderColor: '#FFF' }]}>
-                  {isSelected && <View style={[styles.radioFill, { backgroundColor: '#FFF' }]} />}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-        <View style={styles.footer}>
-          <TouchableOpacity style={[styles.button, !selected && styles.buttonDisabled]} onPress={handleStart} disabled={!selected}>
-            <Text style={styles.buttonText}>Iniciar Rota</Text>
-          </TouchableOpacity>
-        </View>
+    <View style={styles.page}>
+      <Text style={styles.title}>Qual é a sua{"\n"}condição?</Text>
+
+      <View style={styles.list}>
+        {CONDITIONS.map((c) => {
+          const active = selected === c.key;
+          return (
+            <Pressable
+              key={c.key}
+              onPress={() => setSelected(c.key)}
+              style={[styles.row, active && styles.rowActive]}
+            >
+              <View style={[styles.iconBox, { backgroundColor: c.color }]}>
+                <Text style={styles.icon}>{c.icon}</Text>
+              </View>
+
+              <Text style={styles.label}>{c.label}</Text>
+
+              <View style={[styles.radio, active && styles.radioActive]}>
+                {active ? <View style={styles.radioDot} /> : null}
+              </View>
+            </Pressable>
+          );
+        })}
       </View>
-    </SafeAreaView>
+
+      <Pressable
+        disabled={!selected}
+        onPress={() => onDone?.(selected)}
+        style={[styles.btn, !selected && styles.btnDisabled]}
+      >
+        <Text style={styles.btnText}>Iniciar Rota</Text>
+      </Pressable>
+    </View>
   );
 }
+
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#EFEFEF' },
-  container: { flex: 1, padding: 20 },
-  header: { alignItems: 'center', marginTop: 40, marginBottom: 30 },
-  title: { fontSize: 24, fontWeight: 'bold', color: '#002E5D', textAlign: 'center' },
-  list: { paddingBottom: 20 },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', paddingVertical: 12, paddingHorizontal: 15, borderRadius: 15, marginBottom: 15, borderWidth: 2, borderColor: 'transparent', elevation: 2 },
-  iconBox: { width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
-  label: { flex: 1, fontSize: 13, fontWeight: '700', color: '#333', textTransform: 'uppercase' },
-  selectedLabel: { color: '#FFF' },
-  radio: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#CCC', justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
-  radioFill: { width: 14, height: 14, borderRadius: 7 },
-  footer: { paddingVertical: 20 },
-  button: { backgroundColor: '#F18F01', padding: 18, borderRadius: 12, alignItems: 'center', elevation: 3 },
-  buttonDisabled: { backgroundColor: '#CCC', elevation: 0 },
-  buttonText: { color: '#002E5D', fontWeight: 'bold', fontSize: 20 }
+  page: { flex: 1, backgroundColor: "#F3F5F7", paddingHorizontal: 18, paddingTop: 28, paddingBottom: 18 },
+  title: { fontSize: 26, fontWeight: "900", color: "#0B2D4D", textAlign: "center", marginBottom: 16 },
+
+  list: { gap: 10 },
+  row: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    elevation: 2,
+  },
+  rowActive: { borderWidth: 2, borderColor: "#F18F01" },
+
+  iconBox: { width: 42, height: 42, borderRadius: 12, alignItems: "center", justifyContent: "center", marginRight: 12 },
+  icon: { fontSize: 18 },
+
+  label: { flex: 1, fontSize: 12, fontWeight: "800", color: "#1E2A36" },
+
+  radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: "#C9D1DA", alignItems: "center", justifyContent: "center" },
+  radioActive: { borderColor: "#F18F01" },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#F18F01" },
+
+  btn: {
+    marginTop: 18,
+    backgroundColor: "#F18F01",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    elevation: 6,
+  },
+  btnDisabled: { opacity: 0.45 },
+  btnText: { color: "#0B2D4D", fontWeight: "900", fontSize: 18 },
 });
