@@ -26,7 +26,6 @@ export default function SearchScreen({ navigation }) {
     navigation.navigate("Explorar", { destination: poi });
   };
 
-  // 1) Detalhe do POI
   if (selectedPoi) {
     return (
       <View style={styles.page}>
@@ -61,7 +60,7 @@ export default function SearchScreen({ navigation }) {
     );
   }
 
-  // 2) Lista de POIs da categoria
+
   if (selectedCat) {
     return (
       <View style={styles.page}>
@@ -92,7 +91,6 @@ export default function SearchScreen({ navigation }) {
     );
   }
 
-  // 3) Lista de categorias
   return (
     <View style={styles.page}>
       <FlatList

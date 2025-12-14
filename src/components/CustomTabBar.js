@@ -1,107 +1,162 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
   Animated,
-  FlatList,
-  Modal,
+  Image,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
-import { searchPois } from "../api/mockApi";
+import Svg, { Path } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ICONS = {
-  Explorar: "⌖",
-  Pesquisar: "🔎",
-  Mais: "≡",
+  Explorar: require("../assets/navigate.png"),
+  Pesquisar: require("../assets/search.png"),
+  Mais: require("../assets/mais.png"),
 };
+
+
+const SIDE_PAD = 34;         
+const BAR_HEIGHT = 66;
+const CORNER_R = 26;
+
+const NOTCH_W = 120;         
+const NOTCH_DEPTH = 26;      
+
+const BALL_SIZE = 56;
+const BALL_INNER = 40;
+const GAP = 8;              
+
+const ACTIVE_COLOR = "#2C6BFF";
+const INACTIVE_TINT = "#AAB4BF";
+
+
+function buildDownNotchPath(width, height, r, cx, notchW, depth) {
+  const topY = 0;
+  const bottomY = height;
+
+  const x1 = cx - notchW / 2;
+  const x2 = cx + notchW / 2;
+
+  const c1x = x1 + notchW * 0.20;
+  const c2x = cx - notchW * 0.25;
+  const c3x = cx + notchW * 0.25;
+  const c4x = x2 - notchW * 0.20;
+
+  return [
+    `M ${r} ${topY}`,
+    `L ${x1} ${topY}`,
+    `C ${c1x} ${topY}, ${c2x} ${depth}, ${cx} ${depth}`,
+    `C ${c3x} ${depth}, ${c4x} ${topY}, ${x2} ${topY}`,
+    `L ${width - r} ${topY}`,
+    `A ${r} ${r} 0 0 1 ${width} ${topY + r}`,
+    `L ${width} ${bottomY - r}`,
+    `A ${r} ${r} 0 0 1 ${width - r} ${bottomY}`,
+    `L ${r} ${bottomY}`,
+    `A ${r} ${r} 0 0 1 0 ${bottomY - r}`,
+    `L 0 ${topY + r}`,
+    `A ${r} ${r} 0 0 1 ${r} ${topY}`,
+    "Z",
+  ].join(" ");
+}
 
 export default function CustomTabBar({ state, descriptors, navigation }) {
   const { width } = useWindowDimensions();
-  const tabW = width / state.routes.length;
+  const insets = useSafeAreaInsets();
+
+  const routesLen = state.routes.length;
+  const usableW = width - SIDE_PAD * 2;
+  const tabW = usableW / routesLen;
+
+
+  const rawCenters = useMemo(
+    () => state.routes.map((_, i) => SIDE_PAD + tabW * (i + 0.5)),
+    [state.routes.length, tabW]
+  );
+
+
+  const minCx = CORNER_R + NOTCH_W / 2 + 6;
+  const maxCx = width - (CORNER_R + NOTCH_W / 2 + 6);
+  const clampCx = (v) => Math.max(minCx, Math.min(v, maxCx));
+
+
+  const centers = useMemo(() => rawCenters.map(clampCx), [rawCenters.join("|"), width]);
+  const centerX = useRef(new Animated.Value(centers[state.index] ?? centers[0])).current;
+  const bounceY = useRef(new Animated.Value(0)).current;
+
+  const pathRef = useRef(null);
+
+  const initialCx = centers[state.index] ?? centers[0];
+  const initialD = buildDownNotchPath(width, BAR_HEIGHT, CORNER_R, initialCx, NOTCH_W, NOTCH_DEPTH);
+
+
+  useEffect(() => {
+    const id = centerX.addListener(({ value }) => {
+      const cx = clampCx(value);
+      const d = buildDownNotchPath(width, BAR_HEIGHT, CORNER_R, cx, NOTCH_W, NOTCH_DEPTH);
+      pathRef.current?.setNativeProps({ d });
+    });
+    return () => centerX.removeListener(id);
+  }, [centerX, width]);
+
+
+  useEffect(() => {
+    const to = centers[state.index] ?? centers[0];
+
+    Animated.parallel([
+      Animated.spring(centerX, {
+        toValue: to,
+        useNativeDriver: true,
+        damping: 18,
+        stiffness: 170,
+        mass: 1,
+      }),
+      Animated.sequence([
+        Animated.timing(bounceY, { toValue: -6, duration: 120, useNativeDriver: true }),
+        Animated.timing(bounceY, { toValue: 0, duration: 160, useNativeDriver: true }),
+      ]),
+    ]).start();
+  }, [state.index, centers]);
+
+  const ballTranslateX = Animated.subtract(centerX, BALL_SIZE / 2);
+
+  const ballTop = -BALL_SIZE / 2 - GAP;
 
   const activeRouteName = state.routes[state.index]?.name;
-  const isExplore = activeRouteName === "Explorar";
-
-  const anim = useRef(new Animated.Value(state.index)).current;
-
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState([]);
-
-  useEffect(() => {
-    Animated.spring(anim, {
-      toValue: state.index,
-      useNativeDriver: true,
-      damping: 16,
-      stiffness: 160,
-    }).start();
-  }, [state.index, anim]);
-
-  const translateX = anim.interpolate({
-    inputRange: state.routes.map((_, i) => i),
-    outputRange: state.routes.map((_, i) => i * tabW),
-  });
-
-  const notchX = Animated.add(translateX, new Animated.Value(tabW / 2 - 38));
-  const ballX = Animated.add(translateX, new Animated.Value(tabW / 2 - 24));
-
-  const openSearch = async () => {
-    setSearchOpen(true);
-    const r = await searchPois(q);
-    setResults(r);
-  };
-
-  useEffect(() => {
-    if (!searchOpen) return;
-    (async () => {
-      const r = await searchPois(q);
-      setResults(r);
-    })();
-  }, [q, searchOpen]);
-
-  const pickDestination = (item) => {
-    setSearchOpen(false);
-    setQ("");
-    // manda para o mapa e centra no destino
-    navigation.navigate("Explorar", { destination: item });
-  };
 
   return (
-    <View style={styles.wrapper}>
-      <View style={[styles.panel, isExplore ? styles.panelTall : styles.panelShort]}>
-        <View style={styles.handle} />
+    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={styles.shadowHost}>
+  
+        <Svg width={width} height={BAR_HEIGHT} style={styles.svg}>
+          <Path ref={pathRef} d={initialD} fill="#FFFFFF" />
+        </Svg>
 
-        {isExplore ? (
-          <Pressable style={styles.searchHeader} onPress={openSearch}>
-            <View style={styles.leftIcon}>
-              <Text style={styles.leftIconText}>🔍</Text>
+     
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.ballWrap,
+            {
+              top: ballTop,
+              transform: [{ translateX: ballTranslateX }, { translateY: bounceY }],
+            },
+          ]}
+        >
+          <View style={styles.ballOuter}>
+            <View style={styles.ballInner}>
+              <Image source={ICONS[activeRouteName]} style={styles.ballImg} />
             </View>
+          </View>
+        </Animated.View>
 
-            <Text style={styles.headerTitle}>Onde deseja ir?</Text>
-
-            <View style={styles.micIcon}>
-              <Text style={styles.micText}>🎤</Text>
-            </View>
-          </Pressable>
-        ) : null}
-
-        {/* Tabs (zona branca) */}
-        <View style={styles.tabsBar}>
-          {/* notch + bola */}
-          <Animated.View style={[styles.notchWrap, { transform: [{ translateX: notchX }] }]}>
-            <View style={styles.notchCircle} />
-            <View style={styles.notchBridge} />
-          </Animated.View>
-
-          <Animated.View style={[styles.ball, { transform: [{ translateX: ballX }] }]}>
-            <Text style={styles.ballIcon}>{ICONS[activeRouteName] ?? "•"}</Text>
-          </Animated.View>
-
+      
+        <View style={[styles.row, { paddingHorizontal: SIDE_PAD }]}>
           {state.routes.map((route, index) => {
             const isFocused = state.index === index;
+            const label = descriptors[route.key]?.options?.tabBarLabel ?? route.name;
 
             const onPress = () => {
               const event = navigation.emit({
@@ -112,225 +167,92 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
               if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
             };
 
-            const label =
-              descriptors[route.key]?.options?.tabBarLabel ?? route.name;
-
             return (
               <Pressable key={route.key} onPress={onPress} style={styles.tab}>
-                <View style={{ height: 22 }} />
+                <Image
+                  source={ICONS[route.name]}
+                  style={[styles.iconImg, isFocused && styles.iconHidden]}
+                />
                 <Text style={[styles.label, isFocused && styles.labelActive]}>{label}</Text>
               </Pressable>
             );
           })}
         </View>
       </View>
-
-      {/* Modal de pesquisa (no estilo do mock: lista por cima do mapa) */}
-      <Modal
-        visible={searchOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSearchOpen(false)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setSearchOpen(false)} />
-
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-
-          <View style={styles.searchRow}>
-            <Text style={styles.backChevron}>‹</Text>
-            <TextInput
-              value={q}
-              onChangeText={setQ}
-              placeholder="Praça da..."
-              placeholderTextColor="#9AA3AD"
-              style={styles.input}
-              autoFocus
-            />
-            <View style={styles.micSmall}>
-              <Text style={{ color: "#fff" }}>🎤</Text>
-            </View>
-          </View>
-
-          <FlatList
-            data={results}
-            keyExtractor={(item) => String(item.id)}
-            renderItem={({ item, index }) => (
-              <Pressable
-                onPress={() => pickDestination(item)}
-                style={[styles.resultRow, index === 0 && styles.resultRowActive]}
-              >
-                <View style={[styles.dot, index === 0 && styles.dotActive]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.resultTitle, index === 0 && styles.resultTitleActive]}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.resultSub}>VIANA DO CASTELO, PORTUGAL</Text>
-                </View>
-                <Text style={styles.km}>
-                  {(1.7 + index * 0.3).toFixed(1).replace(".", ",")} km
-                </Text>
-              </Pressable>
-            )}
-          />
-        </View>
-      </Modal>
     </View>
   );
 }
 
-const TABS_H = 74;
-
 const styles = StyleSheet.create({
-  wrapper: { backgroundColor: "transparent" },
-
-  panel: {
-    backgroundColor: "#F1F3F6",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    elevation: 25,
+  wrap: {
+    backgroundColor: "transparent",
     overflow: "visible",
   },
-  panelTall: { height: 160 },
-  panelShort: { height: 92 },
-
-  handle: {
-    width: 54,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#C9D1DA",
-    alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 10,
-  },
-
-  searchHeader: {
-    marginHorizontal: 16,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#ffffff",
-    elevation: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 12,
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  leftIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: "#EEF2F6",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  leftIconText: { fontSize: 16 },
-  headerTitle: { fontSize: 16, fontWeight: "800", color: "#6B7A88" },
-  micIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F18F01",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  micText: { color: "#fff", fontWeight: "900" },
-
-  tabsBar: {
-    height: TABS_H,
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    flexDirection: "row",
+  shadowHost: {
+    elevation: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
     overflow: "visible",
   },
-  tab: { flex: 1, alignItems: "center", justifyContent: "center" },
-  label: { fontSize: 12, color: "#9AA3AD" },
-  labelActive: { color: "#F18F01", fontWeight: "900" },
-
-  notchWrap: {
-    position: "absolute",
-    top: -26,
-    width: 76,
-    height: 76,
-    alignItems: "center",
+  svg: {
+    backgroundColor: "transparent",
   },
-  notchCircle: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: "#fff",
-    elevation: 10,
-  },
-  notchBridge: {
-    position: "absolute",
-    bottom: 0,
-    width: 76,
-    height: 26,
-    backgroundColor: "#fff",
-  },
-
-  ball: {
-    position: "absolute",
-    top: -14,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#F18F01",
-    elevation: 25,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ballIcon: { color: "#fff", fontWeight: "900", fontSize: 16 },
-
-  // Modal
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)" },
-  sheet: {
+  row: {
     position: "absolute",
     left: 0,
     right: 0,
-    bottom: 92, // fica “encostado” ao painel
-    backgroundColor: "#fff",
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    padding: 14,
-    elevation: 30,
-    maxHeight: "55%",
-  },
-  sheetHandle: {
-    width: 44,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#D8DEE6",
-    alignSelf: "center",
-    marginBottom: 10,
-  },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
-  backChevron: { fontSize: 26, color: "#6B7A88", width: 18 },
-  input: {
-    flex: 1,
-    backgroundColor: "#F3F5F7",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontWeight: "800",
-    color: "#0B2D4D",
-  },
-  micSmall: { width: 34, height: 34, borderRadius: 17, backgroundColor: "#F18F01", alignItems: "center", justifyContent: "center" },
-
-  resultRow: {
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 14,
+    height: BAR_HEIGHT,
+    bottom: 0,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    alignItems: "flex-end",
   },
-  resultRowActive: { backgroundColor: "#F18F01" },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#C9D1DA" },
-  dotActive: { backgroundColor: "#fff" },
-  resultTitle: { fontWeight: "900", color: "#0B2D4D" },
-  resultTitleActive: { color: "#fff" },
-  resultSub: { fontSize: 10, fontWeight: "800", color: "#6B7A88", marginTop: 2 },
-  km: { fontWeight: "900", color: "#0B2D4D" },
+  tab: {
+    flex: 1,
+    height: BAR_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingBottom: 10,
+  },
+
+  iconImg: {
+    width: 28,
+    height: 28,
+    resizeMode: "contain",
+    marginBottom: 6,
+  },
+  iconHidden: { opacity: 0 },
+
+  label: { fontSize: 12, color: "#9AA3AD" },
+  labelActive: { color: ACTIVE_COLOR, fontWeight: "900" },
+
+  ballWrap: {
+    position: "absolute",
+    width: BALL_SIZE,
+    height: BALL_SIZE,
+  },
+  ballOuter: {
+    width: BALL_SIZE,
+    height: BALL_SIZE,
+    borderRadius: BALL_SIZE / 2,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 30,
+  },
+  ballInner: {
+    width: BALL_INNER,
+    height: BALL_INNER,
+    borderRadius: BALL_INNER / 2,
+    backgroundColor: ACTIVE_COLOR,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ballImg: {
+    width: 22,
+    height: 22,
+    resizeMode: "contain",
+
+  },
 });
