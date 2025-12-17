@@ -9,20 +9,12 @@ import OnboardingScreen from "./src/screens/OnboardingScreen";
 import MapScreen from "./src/screens/MapScreen";
 import CustomTabBar from "./src/components/CustomTabBar";
 import SearchScreen from "./src/screens/SearchScreen";
+import MoreScreen from "./src/screens/MoreScreen";
+
 
 const Tab = createBottomTabNavigator();
 const KEY = "userCondition";
 
-function Placeholder({ title }) {
-  return (
-    <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-      <Text>{title}</Text>
-    </View>
-  );
-}
-function MoreScreen() {
-  return <Placeholder title="Mais (placeholder)" />;
-}
 
 export default function App() {
   console.log("APP BASELINE V2 LOADED");

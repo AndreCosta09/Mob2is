@@ -25,12 +25,15 @@ const CORNER_R = 26;
 const NOTCH_W = 120;         
 const NOTCH_DEPTH = 26;      
 
-const BALL_SIZE = 56;
+const BALL_SIZE = 70;
 const BALL_INNER = 40;
-const GAP = 8;              
+const GAP = 24;              
 
 const ACTIVE_COLOR = "#2C6BFF";
 const INACTIVE_TINT = "#AAB4BF";
+
+const BAR_BG = "#ffffffff";                
+const BAR_STROKE = "rgba(11, 45, 77, 0.17)"; 
 
 
 function buildDownNotchPath(width, height, r, cx, notchW, depth) {
@@ -131,7 +134,13 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
       <View style={styles.shadowHost}>
   
         <Svg width={width} height={BAR_HEIGHT} style={styles.svg}>
-          <Path ref={pathRef} d={initialD} fill="#FFFFFF" />
+          <Path
+              ref={pathRef}
+              d={initialD}
+              fill={BAR_BG}
+              stroke={BAR_STROKE}
+              strokeWidth={1}
+            />
         </Svg>
 
      
@@ -217,8 +226,8 @@ const styles = StyleSheet.create({
   },
 
   iconImg: {
-    width: 28,
-    height: 28,
+    width: 30,
+    height: 30,
     resizeMode: "contain",
     marginBottom: 6,
   },
@@ -232,15 +241,18 @@ const styles = StyleSheet.create({
     width: BALL_SIZE,
     height: BALL_SIZE,
   },
-  ballOuter: {
-    width: BALL_SIZE,
-    height: BALL_SIZE,
-    borderRadius: BALL_SIZE / 2,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 30,
-  },
+ballOuter: {
+  width: BALL_SIZE,
+  height: BALL_SIZE,
+  borderRadius: BALL_SIZE / 2,
+  backgroundColor: "transparent",
+  alignItems: "center",
+  justifyContent: "center",
+  elevation: 0,
+  shadowOpacity: 0,
+},
+
+
   ballInner: {
     width: BALL_INNER,
     height: BALL_INNER,
@@ -250,8 +262,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ballImg: {
-    width: 22,
-    height: 22,
+    width: 30,
+    height: 30,
     resizeMode: "contain",
 
   },

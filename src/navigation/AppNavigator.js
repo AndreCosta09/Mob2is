@@ -7,6 +7,8 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { UserContext, UserProvider } from "../context/UserContext";
 import OnboardingScreen from "../screens/OnboardingScreen";
 import MapScreen from "../screens/MapScreen";
+import SearchScreen from "../screens/SearchScreen";
+import MoreScreen from "../screens/MoreScreen";
 import CustomTabBar from "../components/CustomTabBar";
 
 const Stack = createNativeStackNavigator();
@@ -18,14 +20,6 @@ function Placeholder({ title }) {
       <Text>{title}</Text>
     </View>
   );
-}
-
-function SearchScreen() {
-  return <Placeholder title="Pesquisar (placeholder)" />;
-}
-
-function MoreScreen() {
-  return <Placeholder title="Mais (placeholder)" />;
 }
 
 function MainTabs() {
@@ -42,7 +36,7 @@ function MainTabs() {
 }
 
 function RootNavigator() {
-  const { condition, loading } = useContext(UserContext);
+  const { condition, loading, saveCondition } = useContext(UserContext);
 
   if (loading) return <Placeholder title="A carregar..." />;
 
@@ -51,7 +45,9 @@ function RootNavigator() {
       {condition ? (
         <Stack.Screen name="Main" component={MainTabs} />
       ) : (
-        <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="Onboarding">
+          {(props) => <OnboardingScreen {...props} onDone={saveCondition} />}
+        </Stack.Screen>
       )}
     </Stack.Navigator>
   );
