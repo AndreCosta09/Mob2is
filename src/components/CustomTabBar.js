@@ -8,7 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Defs, Mask, Rect, Path } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const ICONS = {
@@ -17,28 +17,37 @@ const ICONS = {
   Mais: require("../assets/mais.png"),
 };
 
-
-const SIDE_PAD = 34;         
+const SIDE_PAD = 20;
 const BAR_HEIGHT = 66;
-const CORNER_R = 26;
+const CORNER_R = 10;
 
-const NOTCH_W = 120;         
-const NOTCH_DEPTH = 26;      
+const NOTCH_W = 100;
+const NOTCH_DEPTH = 30;
 
-const BALL_SIZE = 70;
-const BALL_INNER = 40;
-const GAP = 24;              
+const BALL_SIZE = 58;
+const BALL_GAP = 5; 
 
-const ACTIVE_COLOR = "#2C6BFF";
-const INACTIVE_TINT = "#AAB4BF";
+const ACTIVE_COLOR = "#F09C1F";
+const INACTIVE_TINT = "#F09C1F";
 
-const BAR_BG = "#ffffffff";                
-const BAR_STROKE = "rgba(11, 45, 77, 0.17)"; 
+const BAR_BG = "#FFFFFF";
+const BAR_STROKE = "rgba(102,112,128,0.25)";
+const NOTCH_STROKE = "rgba(11, 45, 77, 0.10)";
 
 
-function buildDownNotchPath(width, height, r, cx, notchW, depth) {
+const CUT_DEPTH = Math.min(NOTCH_DEPTH, BALL_SIZE / 2 - BALL_GAP + 10);
+
+function getNotchWidth(cx, barW) {
+  const pad = 2;
+  const left = cx - CORNER_R - pad;
+  const right = barW - CORNER_R - pad - cx;
+  const maxBySpace = Math.min(NOTCH_W, left * 2, right * 2);
+  return Math.max(92, Math.min(NOTCH_W, maxBySpace));
+}
+
+function buildDentPath(cx, barW, depth) {
   const topY = 0;
-  const bottomY = height;
+  const notchW = getNotchWidth(cx, barW);
 
   const x1 = cx - notchW / 2;
   const x2 = cx + notchW / 2;
@@ -49,61 +58,55 @@ function buildDownNotchPath(width, height, r, cx, notchW, depth) {
   const c4x = x2 - notchW * 0.20;
 
   return [
-    `M ${r} ${topY}`,
-    `L ${x1} ${topY}`,
+    `M ${x1} ${topY}`,
     `C ${c1x} ${topY}, ${c2x} ${depth}, ${cx} ${depth}`,
     `C ${c3x} ${depth}, ${c4x} ${topY}, ${x2} ${topY}`,
-    `L ${width - r} ${topY}`,
-    `A ${r} ${r} 0 0 1 ${width} ${topY + r}`,
-    `L ${width} ${bottomY - r}`,
-    `A ${r} ${r} 0 0 1 ${width - r} ${bottomY}`,
-    `L ${r} ${bottomY}`,
-    `A ${r} ${r} 0 0 1 0 ${bottomY - r}`,
-    `L 0 ${topY + r}`,
-    `A ${r} ${r} 0 0 1 ${r} ${topY}`,
+    `L ${x1} ${topY}`,
     "Z",
   ].join(" ");
 }
 
-export default function CustomTabBar({ state, descriptors, navigation }) {
+export default function CustomTabBar(props) {
+  const { state, descriptors, navigation } = props || {};
+  if (!state?.routes?.length) return null;
+
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
   const routesLen = state.routes.length;
-  const usableW = width - SIDE_PAD * 2;
-  const tabW = usableW / routesLen;
 
+  const barW = Math.max(260, width - SIDE_PAD * 2);
+  const tabW = barW / routesLen;
 
-  const rawCenters = useMemo(
-    () => state.routes.map((_, i) => SIDE_PAD + tabW * (i + 0.5)),
+  const centers = useMemo(
+    () => state.routes.map((_, i) => tabW * (i + 0.5)),
     [state.routes.length, tabW]
   );
 
-
-  const minCx = CORNER_R + NOTCH_W / 2 + 6;
-  const maxCx = width - (CORNER_R + NOTCH_W / 2 + 6);
-  const clampCx = (v) => Math.max(minCx, Math.min(v, maxCx));
-
-
-  const centers = useMemo(() => rawCenters.map(clampCx), [rawCenters.join("|"), width]);
-  const centerX = useRef(new Animated.Value(centers[state.index] ?? centers[0])).current;
+  const centerX = useRef(
+    new Animated.Value(centers[state.index] ?? centers[0])
+  ).current;
   const bounceY = useRef(new Animated.Value(0)).current;
 
-  const pathRef = useRef(null);
+  const dentMaskRef = useRef(null);
+  const dentStrokeRef = useRef(null);
 
   const initialCx = centers[state.index] ?? centers[0];
-  const initialD = buildDownNotchPath(width, BAR_HEIGHT, CORNER_R, initialCx, NOTCH_W, NOTCH_DEPTH);
-
+  const initialCutD = buildDentPath(initialCx, barW, CUT_DEPTH);
+  const initialDeepD = buildDentPath(initialCx, barW, NOTCH_DEPTH);
 
   useEffect(() => {
     const id = centerX.addListener(({ value }) => {
-      const cx = clampCx(value);
-      const d = buildDownNotchPath(width, BAR_HEIGHT, CORNER_R, cx, NOTCH_W, NOTCH_DEPTH);
-      pathRef.current?.setNativeProps({ d });
+
+      const cutD = buildDentPath(value, barW, CUT_DEPTH);
+      dentMaskRef.current?.setNativeProps({ d: cutD });
+
+  
+      const deepD = buildDentPath(value, barW, NOTCH_DEPTH);
+      dentStrokeRef.current?.setNativeProps({ d: deepD });
     });
     return () => centerX.removeListener(id);
-  }, [centerX, width]);
-
+  }, [centerX, barW]);
 
   useEffect(() => {
     const to = centers[state.index] ?? centers[0];
@@ -112,38 +115,74 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
       Animated.spring(centerX, {
         toValue: to,
         useNativeDriver: true,
-        damping: 18,
-        stiffness: 170,
+        damping: 25,
+        stiffness: 100,
         mass: 1,
       }),
       Animated.sequence([
-        Animated.timing(bounceY, { toValue: -6, duration: 120, useNativeDriver: true }),
-        Animated.timing(bounceY, { toValue: 0, duration: 160, useNativeDriver: true }),
+        Animated.timing(bounceY, {
+          toValue: -2,
+          duration: 120,
+          useNativeDriver: true,
+        }),
+        Animated.timing(bounceY, {
+          toValue: 0,
+          duration: 160,
+          useNativeDriver: true,
+        }),
       ]),
     ]).start();
   }, [state.index, centers]);
 
   const ballTranslateX = Animated.subtract(centerX, BALL_SIZE / 2);
-
-  const ballTop = -BALL_SIZE / 2 - GAP;
+  const ballTop = -BALL_SIZE / 2 - BALL_GAP;
 
   const activeRouteName = state.routes[state.index]?.name;
 
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-      <View style={styles.shadowHost}>
-  
-        <Svg width={width} height={BAR_HEIGHT} style={styles.svg}>
-          <Path
-              ref={pathRef}
-              d={initialD}
-              fill={BAR_BG}
-              stroke={BAR_STROKE}
-              strokeWidth={1}
-            />
+    <View style={[styles.wrap, { paddingBottom: insets.bottom }]}>
+      <View style={[styles.pillShadow, { width: barW, borderRadius: CORNER_R }]}>
+        <Svg width={barW} height={BAR_HEIGHT} style={styles.svg}>
+          <Defs>
+            <Mask
+              id="barMask"
+              x={0}
+              y={-80}
+              width={barW}
+              height={BAR_HEIGHT + 160}
+              maskUnits="userSpaceOnUse"
+            >
+              <Rect
+                x="0"
+                y="0"
+                width={barW}
+                height={BAR_HEIGHT}
+                rx={CORNER_R}
+                ry={CORNER_R}
+                fill="rgb(255, 255, 255)"
+              />
+        
+              <Path ref={dentMaskRef} d={initialCutD} fill="black" />
+            </Mask>
+          </Defs>
+
+        
+          <Rect
+            x="0"
+            y="0"
+            width={barW}
+            height={BAR_HEIGHT}
+            rx={CORNER_R}
+            ry={CORNER_R}
+            fill={BAR_BG}
+            stroke={BAR_STROKE}
+            mask="url(#barMask)"
+          />
+
+       
+ 
         </Svg>
 
-     
         <Animated.View
           pointerEvents="none"
           style={[
@@ -154,15 +193,12 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
             },
           ]}
         >
-          <View style={styles.ballOuter}>
-            <View style={styles.ballInner}>
-              <Image source={ICONS[activeRouteName]} style={styles.ballImg} />
-            </View>
+          <View style={styles.ball}>
+            <Image source={ICONS[activeRouteName]} style={styles.ballImg} />
           </View>
         </Animated.View>
 
-      
-        <View style={[styles.row, { paddingHorizontal: SIDE_PAD }]}>
+        <View style={styles.row}>
           {state.routes.map((route, index) => {
             const isFocused = state.index === index;
             const label = descriptors[route.key]?.options?.tabBarLabel ?? route.name;
@@ -194,20 +230,22 @@ export default function CustomTabBar({ state, descriptors, navigation }) {
 
 const styles = StyleSheet.create({
   wrap: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: "transparent",
+    alignItems: "center",
     overflow: "visible",
   },
-  shadowHost: {
-    elevation: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+
+  pillShadow: {
     overflow: "visible",
-  },
-  svg: {
     backgroundColor: "transparent",
   },
+
+  svg: { backgroundColor: "transparent" },
+
   row: {
     position: "absolute",
     left: 0,
@@ -217,6 +255,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
   },
+
   tab: {
     flex: 1,
     height: BAR_HEIGHT,
@@ -230,6 +269,7 @@ const styles = StyleSheet.create({
     height: 30,
     resizeMode: "contain",
     marginBottom: 6,
+    tintColor: INACTIVE_TINT,
   },
   iconHidden: { opacity: 0 },
 
@@ -241,30 +281,25 @@ const styles = StyleSheet.create({
     width: BALL_SIZE,
     height: BALL_SIZE,
   },
-ballOuter: {
-  width: BALL_SIZE,
-  height: BALL_SIZE,
-  borderRadius: BALL_SIZE / 2,
-  backgroundColor: "transparent",
-  alignItems: "center",
-  justifyContent: "center",
-  elevation: 0,
-  shadowOpacity: 0,
-},
 
-
-  ballInner: {
-    width: BALL_INNER,
-    height: BALL_INNER,
-    borderRadius: BALL_INNER / 2,
+  ball: {
+    width: BALL_SIZE,
+    height: BALL_SIZE,
+    borderRadius: BALL_SIZE / 2,
     backgroundColor: ACTIVE_COLOR,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 10,
   },
-  ballImg: {
-    width: 30,
-    height: 30,
-    resizeMode: "contain",
 
+  ballImg: {
+    width: 25,
+    height: 25,
+    resizeMode: "contain",
+    tintColor: "#0B2D4D",
   },
 });

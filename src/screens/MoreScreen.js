@@ -111,7 +111,8 @@ export default function MoreScreen({ navigation }) {
           title="Definições"
           subtitle="Acessibilidade e idioma"
           icon={ICONS.settings}
-          onPress={() => console.log("Definições")}
+          onPress={() => navigation.navigate("Settings")}
+
         />
 
         <View style={styles.sep} />
@@ -137,18 +138,20 @@ const styles = StyleSheet.create({
     paddingTop: 14,
   },
 
-  header: {
-    borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: C.orange,
-    shadowColor: "#000",
-    shadowOpacity: 0.10,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
-  },
+ header: {
+  borderRadius: 18,
+  paddingVertical: 14,
+  paddingHorizontal: 16,
+  marginBottom: 12,
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: "rgba(11,45,77,0.08)",
+  shadowColor: "#000",
+  shadowOpacity: 0.08,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 10 },
+  elevation: 4,
+},
   hTitle: {
     fontSize: 20,
     fontWeight: "900",

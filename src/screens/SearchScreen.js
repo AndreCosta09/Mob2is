@@ -11,19 +11,23 @@ import {
   Text,
   UIManager,
   View,
+  ScrollView
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { fetchCategories, fetchPoisByCategory } from "../api/mockApi";
+
+import Mob2isLogo from "../assets/logo/logo.svg";
 
 const C = {
   bg: "#F3F5F7",
   text: "#0B2D4D",
   muted: "#6B7A88",
-  green: "#33A35A",
+  green: "#39A25D",
   greenDark: "#2E8F50",
   pill: "#E9EDF2",
   white: "#FFFFFF",
   shadow: "rgba(0,0,0,0.12)",
+  blue :"#1579B3",
 };
 
 const ASSETS = {
@@ -68,25 +72,30 @@ function useScreenTransition(key) {
 function AnimatedPressable({
   onPress,
   style,
+  containerStyle,
   children,
   disabled,
-  haptic = false, 
 }) {
   const scale = useRef(new Animated.Value(1)).current;
 
-  const pressIn = () => {
-    Animated.spring(scale, { toValue: 0.98, useNativeDriver: true }).start();
-  };
-  const pressOut = () => {
-    Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
-  };
+  const pressIn = () => Animated.spring(scale, { toValue: 0.985, useNativeDriver: true }).start();
+  const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
 
   return (
-    <Pressable disabled={disabled} onPress={onPress} onPressIn={pressIn} onPressOut={pressOut}>
+    <Pressable
+     android_ripple={{ color: "rgba(5,31,65,0.06)" }} 
+      hitSlop={8}
+      disabled={disabled}
+      onPress={onPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      style={containerStyle}
+    >
       <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
     </Pressable>
   );
 }
+
 
 function CategoryRow({ item, active, onPress }) {
   const a = useRef(new Animated.Value(active ? 1 : 0)).current;
@@ -111,10 +120,18 @@ function CategoryRow({ item, active, onPress }) {
   });
 
   return (
-    <AnimatedPressable onPress={onPress} style={[styles.catBtn, { backgroundColor: bg }]}>
-      <Animated.Text style={[styles.catText, { color: txt }]}>{item.name}</Animated.Text>
-    </AnimatedPressable>
-  );
+      <AnimatedPressable
+        onPress={onPress}
+        containerStyle={styles.catPressable}
+        style={[styles.catBtn, { backgroundColor: bg }]}
+      >
+        <Animated.Text style={[styles.catText, { color: txt }]}>{item.name}</Animated.Text>
+      </AnimatedPressable>
+    );
+
+
+
+
 }
 
 function PoiCard({ item, index, onPress }) {
@@ -151,10 +168,8 @@ function PoiCard({ item, index, onPress }) {
             style={styles.poiImage}
             resizeMode="cover"
           />
-          <View style={styles.poiImageShade} />
-          <View style={styles.poiPill}>
-            <Text style={styles.poiPillText}>{item.title.toUpperCase()}</Text>
-          </View>
+      
+  
         </View>
 
         <View style={styles.poiFooter}>
@@ -181,10 +196,9 @@ export default function SearchScreen({ navigation }) {
 
   const [loadingPois, setLoadingPois] = useState(false);
 
-  // animação de “hero” no detalhe
+
   const heroIn = useRef(new Animated.Value(0)).current;
 
-  // habilitar LayoutAnimation no Android
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -244,33 +258,47 @@ export default function SearchScreen({ navigation }) {
     navigation.navigate("Explorar", { destination: poi });
   };
 
-  // ===================== DETAIL =====================
-  if (selectedPoi) {
-    const bounce = {
-      opacity: heroIn,
-      transform: [
-        {
-          translateY: heroIn.interpolate({
-            inputRange: [0, 1],
-            outputRange: [18, 0],
-          }),
-        },
-      ],
-    };
 
-    return (
-      <View style={styles.page}>
-        <View style={styles.greenHeader}>
-          <Pressable onPress={back} style={styles.backBtn}>
-            <Text style={styles.backText}>‹</Text>
-          </Pressable>
-          <Text numberOfLines={1} style={styles.headerTitle}>
-            {selectedPoi.title}
-          </Text>
-          <View style={{ width: 40 }} />
-        </View>
 
-        <Animated.View style={[styles.detailWrap, bounce]}>
+if (selectedPoi) {
+  const bounce = {
+    opacity: heroIn,
+    transform: [
+      {
+        translateY: heroIn.interpolate({
+          inputRange: [0, 1],
+          outputRange: [18, 0],
+        }),
+      },
+    ],
+  };
+
+
+  const actionsBottom = tabBarH + 10;
+  const actionsHeight = 170; 
+
+  return (
+    <View style={styles.page}>
+
+      <View style={styles.greenHeader}>
+        <Pressable onPress={back} style={styles.backBtn}>
+          <Text style={styles.backText}>‹</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={styles.headerTitle}>
+          {selectedPoi.title}
+        </Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <View style={{ flex: 1 }}>
+        {/* CONTEÚDO COM SCROLL */}
+        <Animated.ScrollView
+          style={[{ flex: 1 }, bounce]}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingBottom: actionsBottom + actionsHeight,
+          }}
+        >
           <View style={styles.detailHero}>
             <Image
               source={{ uri: selectedPoi.image ?? ASSETS.placeholder }}
@@ -283,7 +311,9 @@ export default function SearchScreen({ navigation }) {
             <View style={styles.detailRow}>
               <View style={styles.metaPills}>
                 <View style={styles.metaPill}>
-                  <Text style={styles.metaPillText}>★ {String(selectedPoi.rating).replace(".", ",")}</Text>
+                  <Text style={styles.metaPillText}>
+                    ★ {String(selectedPoi.rating).replace(".", ",")}
+                  </Text>
                 </View>
                 <View style={styles.metaPill}>
                   <Text style={styles.metaPillText}>👍</Text>
@@ -294,35 +324,47 @@ export default function SearchScreen({ navigation }) {
               </View>
 
               <Text style={styles.smallHint}>
-                {selectedPoi.visits ? `Visitas guiadas: ${selectedPoi.visits}` : "Visitas guiadas por marcação"}
+                {selectedPoi.visits
+                  ? `Visitas guiadas: ${selectedPoi.visits}`
+                  : "Visitas guiadas por marcação"}
               </Text>
             </View>
 
             <Text style={styles.desc}>{selectedPoi.description}</Text>
-
-            <AnimatedPressable style={styles.primaryBtn} onPress={() => goToMap(selectedPoi)}>
-              <Text style={styles.primaryBtnText}>Ir até ao local</Text>
-            </AnimatedPressable>
-
-            <AnimatedPressable style={styles.secondaryBtn} onPress={() => {}}>
-              <Text style={styles.secondaryBtnText}>Navegar pelo interior</Text>
-            </AnimatedPressable>
           </View>
-        </Animated.View>
-      </View>
-    );
-  }
+        </Animated.ScrollView>
 
-  // ===================== CATEGORY LIST =====================
+        {/* BOTÕES FIXOS (SEM CARD) */}
+        <View style={[styles.fixedActions, { bottom: actionsBottom }]}>
+          <AnimatedPressable style={styles.primaryBtn} onPress={() => goToMap(selectedPoi)}>
+            <Text style={styles.primaryBtnText}>Ir até ao local</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable style={styles.secondaryBtn} onPress={() => {}}>
+            <Text style={styles.secondaryBtnText}>Navegar pelo interior</Text>
+          </AnimatedPressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+
+
+
+
   if (selectedCat) {
     return (
       <View style={styles.page}>
+
+
         <View style={styles.greenHeader}>
           <Pressable onPress={back} style={styles.backBtn}>
             <Text style={styles.backText}>‹</Text>
           </Pressable>
           <Text style={styles.headerTitle}>{selectedCat.name}</Text>
           <View style={{ width: 40 }} />
+
         </View>
 
         <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
@@ -334,7 +376,8 @@ export default function SearchScreen({ navigation }) {
             <FlatList
               data={pois}
               keyExtractor={(i) => String(i.id)}
-              contentContainerStyle={{ padding: 14, paddingBottom: tabBarH + 40 }}
+              contentContainerStyle={{ 
+                padding: 14, paddingBottom: tabBarH + 40 }}
               renderItem={({ item, index }) => (
                 <PoiCard item={item} index={index} onPress={() => openPoi(item)} />
               )}
@@ -345,18 +388,34 @@ export default function SearchScreen({ navigation }) {
     );
   }
 
-  // ===================== CATEGORIES =====================
+
   return (
     <View style={styles.page}>
+
+      <View pointerEvents="none" style={styles.bgLogo}>
+        <Mob2isLogo width={450} height={450} opacity={0.15} />
+      </View>
+
       <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
+        
         <FlatList
           data={categories}
           keyExtractor={(c) => c.id}
-          contentContainerStyle={{ padding: 14, paddingBottom: tabBarH + 40 }}
+          ListHeaderComponent={
+           <View style={{ paddingTop: 10, paddingBottom: 12 }}>
+                  <View style={styles.handle} />
+                  <Text style={styles.pageTitle}>Categorias</Text>
+            </View>
+          }
+          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: tabBarH + 40 }}
           renderItem={({ item }) => (
             <CategoryRow item={item} active={false} onPress={() => pickCategory(item)} />
           )}
+
+
         />
+
+
       </Animated.View>
     </View>
   );
@@ -364,6 +423,29 @@ export default function SearchScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: C.bg },
+
+      bgLogo: {
+      position: "absolute",
+      left: -13,
+      top: 200,
+    },
+
+      handle: {
+      width: 56,
+      height: 6,
+      borderRadius: 999,
+      backgroundColor: "rgba(102,112,128,0.25)", 
+      alignSelf: "center",
+      marginBottom: 10,
+    },
+    pageTitle: {
+      textAlign: "center",
+      color: C.text,
+      fontWeight: "900",
+      fontSize: 25,
+      letterSpacing: 0.2,
+    },
+
 
   greenHeader: {
     height: 70,
@@ -391,21 +473,38 @@ const styles = StyleSheet.create({
     fontSize: 18,
   },
 
-  // categories
-  catBtn: {
-    borderRadius: 18,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+  catPressable: {
+    width: "100%",
+    alignSelf: "stretch",
     marginBottom: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
   },
-  catText: { fontWeight: "900", letterSpacing: 0.2 },
 
-  // poi cards (mockup style)
+catBtn: {
+  width: "100%",
+  borderRadius: 18,
+  paddingVertical: 16,
+  paddingHorizontal: 18,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: C.pill,
+  borderWidth: 1,
+  borderColor: "rgba(102,112,128,0.18)",
+  shadowColor: "#000",
+  shadowOpacity: 0.04,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 4 },
+  elevation: 1,
+},
+
+
+  catText: {
+    fontWeight: "900",
+    letterSpacing: 0.2,
+    textAlign: "center",     
+    fontSize: 14,
+  },
+
+
   poiCard: {
     backgroundColor: C.white,
     borderRadius: 22,
@@ -448,7 +547,29 @@ const styles = StyleSheet.create({
   },
   ratingBadgeText: { fontWeight: "900", color: C.text },
 
-  // detail
+
+
+
+fixedActions: {
+  position: "absolute",
+  left: 14,
+  right: 14,
+  paddingTop: 10,
+  paddingBottom: 30,
+},
+
+dockHandle: {
+  width: 44,
+  height: 5,
+  borderRadius: 999,
+  backgroundColor: "rgba(11,45,77,0.18)",
+  alignSelf: "center",
+  marginBottom: 12,
+},
+
+
+
+
   detailWrap: { flex: 1 },
   detailHero: {
     margin: 14,

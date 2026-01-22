@@ -14,11 +14,6 @@ export default function SplashScreen() {
         />
       </View>
 
-      <View style={styles.buttonContainer}>
-        <View style={styles.fakeButton}>
-          <Text style={styles.fakeButtonText}>Iniciar Rota</Text>
-        </View>
-      </View>
     </View>
   );
 }

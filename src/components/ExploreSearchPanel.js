@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
   Pressable,
@@ -7,13 +7,92 @@ import {
   TextInput,
   View,
   FlatList,
+  PermissionsAndroid,
+  Platform,
 } from "react-native";
-import { searchPois } from "../api/mockApi";
+import Voice from "@react-native-voice/voice";
+
+import { getPOIs, searchPois } from "../api/mockApi";
+
+const EXTRA_GAP = 40;
+
+function norm(str) {
+  return (str ?? "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Dice coefficient (bigrams)
+function dice(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.length < 2 || b.length < 2) return 0;
+
+  const bigrams = new Map();
+  for (let i = 0; i < a.length - 1; i++) {
+    const bg = a.slice(i, i + 2);
+    bigrams.set(bg, (bigrams.get(bg) || 0) + 1);
+  }
+
+  let inter = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const bg = b.slice(i, i + 2);
+    const c = bigrams.get(bg) || 0;
+    if (c > 0) {
+      bigrams.set(bg, c - 1);
+      inter++;
+    }
+  }
+
+  return (2 * inter) / ((a.length - 1) + (b.length - 1));
+}
+
+function bestPoiMatch(spoken, pois) {
+  const q = norm(spoken);
+  if (!q) return null;
+
+  const qTokens = q.split(" ").filter(t => t.length >= 3);
+
+  let best = null;
+  let bestScore = 0;
+
+  for (const p of pois) {
+    const title = norm(p.title);
+    if (!title) continue;
+
+
+    let score = dice(q, title);
+
+    if (qTokens.length) {
+      const hits = qTokens.filter(t => title.includes(t)).length;
+      const tokenBonus = hits / qTokens.length; 
+      score = score * 0.78 + tokenBonus * 0.22;
+    }
+
+    if (title.includes(q) || q.includes(title)) score += 0.12;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = p;
+    }
+  }
+
+  return best ? { poi: best, score: bestScore } : null;
+}
 
 export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
+
+
+  const [listening, setListening] = useState(false);
+  const [heardText, setHeardText] = useState("");
 
   const load = async (query) => {
     const r = await searchPois(query);
@@ -36,24 +115,115 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
     onPickDestination?.(item);
   };
 
+
+  useEffect(() => {
+    Voice.onSpeechResults = (e) => {
+      const text = e?.value?.[0] ?? "";
+      if (!text) return;
+      setHeardText(text);
+      finishVoiceWithText(text);
+    };
+
+    Voice.onSpeechError = () => {
+      stopVoice();
+    };
+
+    return () => {
+      Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
+    };
+  
+  }, []);
+
+  const ensureMicPermission = async () => {
+    if (Platform.OS !== "android") return true;
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.RECORD_AUDIO
+    );
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  };
+
+  const startVoice = async () => {
+    const ok = await ensureMicPermission();
+    if (!ok) return;
+
+    setHeardText("");
+    setListening(true);
+
+    try {
+
+      await Voice.start("pt-PT");
+    } catch {
+      setListening(false);
+    }
+  };
+
+  const stopVoice = async () => {
+    try { await Voice.stop(); } catch {}
+    setListening(false);
+  };
+
+  const finishVoiceWithText = async (text) => {
+    await stopVoice();
+
+    try {
+      const pois = await getPOIs();
+      const match = bestPoiMatch(text, pois);
+
+
+      if (match?.poi && match.score >= 0.52) {
+        pick(match.poi); 
+        return;
+      }
+
+      setQ(text);
+      setOpen(true);
+      await load(text);
+    } catch {
+      setQ(text);
+      setOpen(true);
+      await load(text);
+    }
+  };
+
   return (
     <>
-      <View style={[styles.panel, { bottom: bottomOffset }]}>
+      {/* Barra no mapa */}
+      <View style={[styles.panel, { bottom: bottomOffset + EXTRA_GAP }]}>
         <View style={styles.handle} />
 
-        <Pressable style={styles.searchRow} onPress={openModal}>
-          <View style={styles.leftCircle}>
-            <Text style={{ fontSize: 16 }}>🔍</Text>
-          </View>
+        <View style={styles.searchRow}>
+          {/* Tap area para abrir modal */}
+          <Pressable style={styles.searchTapArea} onPress={openModal}>
+            <View style={styles.leftCircle}>
+              <Text style={{ fontSize: 16 }}>🔍</Text>
+            </View>
+            <Text style={styles.title}>Onde deseja ir?</Text>
+          </Pressable>
 
-          <Text style={styles.title}>Onde deseja ir?</Text>
-
-          <View style={styles.rightCircle}>
+        
+          <Pressable style={styles.rightCircle} onPress={startVoice}>
             <Text style={{ color: "#fff", fontWeight: "900" }}>🎤</Text>
-          </View>
-        </Pressable>
+          </Pressable>
+        </View>
       </View>
 
+      
+      <Modal visible={listening} transparent animationType="fade">
+        <View style={styles.listenBackdrop}>
+          <View style={styles.listenCard}>
+            <Text style={styles.listenTitle}>A ouvir…</Text>
+            <Text style={styles.listenSub} numberOfLines={2}>
+              {heardText ? `“${heardText}”` : "Diz o destino, por exemplo: “Hospital de Santa Luzia”"}
+            </Text>
+
+            <Pressable style={styles.listenCancel} onPress={stopVoice}>
+              <Text style={styles.listenCancelText}>Cancelar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+   
       <Modal
         visible={open}
         transparent
@@ -130,16 +300,24 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 10,
   },
+
   searchRow: {
     height: 48,
     borderRadius: 24,
     backgroundColor: "#fff",
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
-    justifyContent: "space-between",
+    paddingLeft: 10,
+    paddingRight: 6,
     elevation: 10,
   },
+  searchTapArea: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
   leftCircle: {
     width: 34,
     height: 34,
@@ -209,4 +387,31 @@ const styles = StyleSheet.create({
 
   km: { fontWeight: "900", color: "#0B2D4D" },
   kmActive: { color: "#fff" },
+
+  // Listening UI
+  listenBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+  },
+  listenCard: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 16,
+    elevation: 22,
+  },
+  listenTitle: { fontSize: 16, fontWeight: "900", color: "#0B2D4D" },
+  listenSub: { marginTop: 8, fontWeight: "800", color: "#6B7A88" },
+  listenCancel: {
+    marginTop: 14,
+    height: 42,
+    borderRadius: 16,
+    backgroundColor: "#051F41",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  listenCancelText: { color: "#fff", fontWeight: "900" },
 });
