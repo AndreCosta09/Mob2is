@@ -19,6 +19,7 @@ const CACHE_KEYS = {
 async function readCache(key) {
   try {
     const raw = await AsyncStorage.getItem(key);
+    
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed?.ts || !parsed?.data) return null;

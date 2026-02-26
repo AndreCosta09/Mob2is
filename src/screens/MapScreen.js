@@ -1,41 +1,86 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Platform, View, StyleSheet, Pressable, Text } from "react-native";
+import {
+  Platform,
+  View,
+  StyleSheet,
+  Pressable,
+  Text,
+  ScrollView,
+  Modal,
+  PermissionsAndroid,
+} from "react-native";
+import Geolocation from "react-native-geolocation-service";
 import MapLibreGL from "@maplibre/maplibre-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { UserContext } from "../context/UserContext";
 import { calculateRoute, getClassifiedStreets, getPOIs, VIANA_COORDS } from "../api/mockApi";
+
+import Svg, { Path, Circle, Rect, Line } from "react-native-svg";
 
 import ExploreSearchPanel from "../components/ExploreSearchPanel";
 import PoiDetailsSheet from "../components/PoiDetailsSheet";
 import NavigationSheet from "../components/NavigationSheet";
 
+import { extractLinesFromCaminho, splitLineOnGaps } from "../utils/map/geo";
+import {
+  buildStreetIndex,
+  buildRouteGeojsonFromPontos,
+  buildRouteGeojsonFromCaminho,
+  estimateEtaMinutesFromLines,
+} from "../utils/map/route";
+
+import { useTranslation } from "react-i18next";
+
+
 const MAPTILER_KEY = "sZvLsgabyQeCL0ehvC55";
-const MAP_STYLE = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`;
+const MAP_STYLE_URL = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`;
+
+
+
+function normTxt(s) {
+  return (s ?? "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function iconNameForPoi(poi) {
+  const cat = normTxt(poi?.categoryName ?? poi?.categoryId);
+
+  if (cat.includes("saud") || cat.includes("hospital") || cat.includes("clin")) return "health";
+  if (cat.includes("cultur") || cat.includes("muse") || cat.includes("teatr") || cat.includes("monum"))
+    return "culture";
+  if (cat.includes("escol") || cat.includes("educ") || cat.includes("univers")) return "education";
+  if (cat.includes("transp") || cat.includes("autocar") || cat.includes("comboio") || cat.includes("parag"))
+    return "transport";
+  if (cat.includes("rest") || cat.includes("comid") || cat.includes("cafe") || cat.includes("bar"))
+    return "food";
+  if (cat.includes("desport") || cat.includes("ginas") || cat.includes("pisc")) return "sport";
+
+  return "default";
+}
+
+function categoryKeyFromName(nameOrId) {
+  const cat = normTxt(nameOrId);
+
+  if (cat.includes("cultur")) return "culture";
+  if (cat.includes("saud") || cat.includes("hospital") || cat.includes("clin")) return "health";
+  if (cat.includes("transp") || cat.includes("autocar") || cat.includes("comboio")) return "transport";
+  if (cat.includes("servic") || cat.includes("public")) return "public_services";
+  if (cat.includes("turism")) return "tourism";
+
+  return "other";
+}
+
+
 
 function mapConditionToIncapacidade(conditionKey) {
   if (conditionKey === "asd") return "Autismo";
   if (conditionKey === "visual") return "Invisual";
   return "MobReduzida";
-}
-
-function toNum(v) {
-  const n = typeof v === "string" ? Number(v) : v;
-  return Number.isFinite(n) ? n : null;
-}
-
-function isPointLike(obj) {
-  if (!obj || typeof obj !== "object") return false;
-  const lat = toNum(obj.latitude ?? obj.lat ?? obj.y);
-  const lng = toNum(obj.longitude ?? obj.lng ?? obj.long ?? obj.x);
-  return lat != null && lng != null;
-}
-
-function pointToLngLat(obj) {
-  const lat = toNum(obj.latitude ?? obj.lat ?? obj.y);
-  const lng = toNum(obj.longitude ?? obj.lng ?? obj.long ?? obj.x);
-  if (lat == null || lng == null) return null;
-  return [lng, lat];
 }
 
 function haversineMeters([lng1, lat1], [lng2, lat2]) {
@@ -49,366 +94,163 @@ function haversineMeters([lng1, lat1], [lng2, lat2]) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-function splitLineOnGaps(line, maxGapMeters = 350) {
-  if (!Array.isArray(line) || line.length < 2) return [];
+function bearingDeg([lng1, lat1], [lng2, lat2]) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const toDeg = (r) => (r * 180) / Math.PI;
+
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δλ = toRad(lng2 - lng1);
+
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+
+  const θ = Math.atan2(y, x);
+  return (toDeg(θ) + 360) % 360;
+}
+
+function lerpAngle(a, b, t) {
+  const d = ((b - a + 540) % 360) - 180;
+  return (a + d * t + 360) % 360;
+}
+
+
+function offsetForwardMeters([lng, lat], headingDeg, meters) {
+
+  const rad = (headingDeg * Math.PI) / 180;
+  const dLat = (meters * Math.cos(rad)) / 111320;
+  const dLng = (meters * Math.sin(rad)) / (111320 * Math.cos((lat * Math.PI) / 180));
+  return [lng + dLng, lat + dLat];
+}
+
+function normalizeRouteGeojson(fc) {
+  if (!fc?.features?.length) return { type: "FeatureCollection", features: [] };
+
   const out = [];
-  let cur = [line[0]];
+  for (const f of fc.features) {
+    if (!f?.geometry) continue;
 
-  for (let i = 1; i < line.length; i++) {
-    const prev = line[i - 1];
-    const next = line[i];
-    const d = haversineMeters(prev, next);
-
-    if (d > maxGapMeters) {
-      if (cur.length >= 2) out.push(cur);
-      cur = [next];
+    if (f.geometry.type === "LineString") {
+      out.push(f);
       continue;
     }
-
-    cur.push(next);
-  }
-
-  if (cur.length >= 2) out.push(cur);
-  return out;
-}
-
-function extractLinesFromCaminho(caminho) {
-
-  const normalize = (node) => {
-    if (!node) return [];
-
-    if (Array.isArray(node)) {
-
-      if (node.length && node.every(isPointLike)) {
-        const line = node.map(pointToLngLat).filter(Boolean);
-        return line.length ? [line] : [];
+    if (f.geometry.type === "MultiLineString") {
+      for (const coords of f.geometry.coordinates ?? []) {
+        out.push({
+          type: "Feature",
+          properties: { ...(f.properties ?? {}) },
+          geometry: { type: "LineString", coordinates: coords },
+        });
       }
-
-      if (
-        node.length >= 2 &&
-        (typeof node[0] === "number" || typeof node[0] === "string") &&
-        (typeof node[1] === "number" || typeof node[1] === "string")
-      ) {
-        const a = toNum(node[0]);
-        const b = toNum(node[1]);
-        if (a != null && b != null) return [[[a, b]]];
-      }
-
-
-      return node.flatMap(normalize);
     }
-
-    if (isPointLike(node)) {
-      const c = pointToLngLat(node);
-      return c ? [[c]] : [];
-    }
-
-    if (typeof node === "object") {
-      // embrulhos típicos
-      if (node.geometry) return normalize(node.geometry);
-      if (node.coordinates) return normalize(node.coordinates);
-      if (node.paths) return normalize(node.paths);
-    }
-
-    return [];
-  };
-
-  const rawLines = normalize(caminho);
-
-
-  if (rawLines.length && rawLines.every((l) => l.length === 1)) {
-    const merged = rawLines.map((l) => l[0]);
-    return merged.length >= 2 ? [merged] : [];
   }
-
-  return rawLines
-    .map((line) => {
-      const cleaned = [];
-      for (const c of line) {
-        if (!Array.isArray(c) || c.length < 2) continue;
-        const lng = toNum(c[0]);
-        const lat = toNum(c[1]);
-        if (lng == null || lat == null) continue;
-        if (lng < -180 || lng > 180 || lat < -90 || lat > 90) continue;
-
-        const last = cleaned[cleaned.length - 1];
-        if (!last || last[0] !== lng || last[1] !== lat) cleaned.push([lng, lat]);
-      }
-      return cleaned;
-    })
-    .filter((l) => l.length >= 2);
+  return { type: "FeatureCollection", features: out };
 }
 
-function hexToRgb(hex) {
-  if (!hex) return null;
-  const h = String(hex).trim().replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  if (full.length !== 6) return null;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  if ([r, g, b].some((v) => Number.isNaN(v))) return null;
-  return { r, g, b };
+const ICON_COLOR = "#051F41";
+
+function IconDefault({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M12 21s7-4.5 7-10a7 7 0 1 0-14 0c0 5.5 7 10 7 10Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+      <Circle cx="12" cy="11" r="2.5" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+function IconHealth({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4Z" fill={color} />
+    </Svg>
+  );
+}
+function IconCulture({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 10h16" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M6 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M10 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M14 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M18 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M3.5 10 12 5l8.5 5" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+      <Path d="M4 19h16" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+function IconEducation({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5 6h7a3 3 0 0 1 3 3v12a3 3 0 0 0-3-3H5V6Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+      <Path d="M19 6h-7a3 3 0 0 0-3 3v12a3 3 0 0 1 3-3h7V6Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+      <Path d="M8 10h4" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+function IconTransport({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M6 4h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+      <Path d="M7 8h10" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Circle cx="8" cy="18" r="1.7" stroke={color} strokeWidth={2} />
+      <Circle cx="16" cy="18" r="1.7" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+function IconFood({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M7 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M5 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M9 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M7 11v10" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M15 3v8c0 1.5 1 2.5 2.5 2.5V21" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M15 8h5" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+  );
+}
+function IconSport({ size = 18, color = ICON_COLOR }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x="3" y="9" width="3" height="6" rx="1" stroke={color} strokeWidth={2} />
+      <Rect x="18" y="9" width="3" height="6" rx="1" stroke={color} strokeWidth={2} />
+      <Path d="M6 12h12" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Rect x="8" y="10" width="8" height="4" rx="1" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
 }
 
-function rgbToHsv({ r, g, b }) {
-  const rp = r / 255;
-  const gp = g / 255;
-  const bp = b / 255;
-  const max = Math.max(rp, gp, bp);
-  const min = Math.min(rp, gp, bp);
-  const d = max - min;
-
-  let h = 0;
-  if (d !== 0) {
-    if (max === rp) h = ((gp - bp) / d) % 6;
-    else if (max === gp) h = (bp - rp) / d + 2;
-    else h = (rp - gp) / d + 4;
-    h = Math.round(h * 60);
-    if (h < 0) h += 360;
-  }
-
-  const s = max === 0 ? 0 : d / max;
-  const v = max;
-  return { h, s, v };
-}
-
-function accessibilityLabelFromColor(hex) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return "Alta acessibilidade";
-  const { h, s } = rgbToHsv(rgb);
-
-  if (s > 0.18) {
-    if (h < 15 || h >= 330) return "Baixa acessibilidade";
-    if (h >= 15 && h < 75) return "Média acessibilidade";
-  }
-  return "Alta acessibilidade";
-}
-
-const ACCESS_COLORS = {
-  alta: "#39A25D", 
-  media: "#F0B429", 
-  baixa: "#FF4D6D",
+const POI_SVG = {
+  default: IconDefault,
+  health: IconHealth,
+  culture: IconCulture,
+  education: IconEducation,
+  transport: IconTransport,
+  food: IconFood,
+  sport: IconSport,
 };
 
-function rgbLuma({ r, g, b }) {
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; 
+function PoiSvgIcon({ name, size = 18, color }) {
+  const Comp = POI_SVG[name] ?? IconDefault;
+  return <Comp size={size} color={color} />;
 }
 
-function levelFromApiColor(hex) {
-  const rgb = hexToRgb(hex);
-  if (!rgb) return "Alta acessibilidade";
-
-  const { h } = rgbToHsv(rgb);
-  const l = rgbLuma(rgb);
-
-  if (h >= 80 && h <= 170) return "Alta acessibilidade";
-  if (h >= 170 && h <= 260) {
-    return l < 0.42 ? "Baixa acessibilidade" : "Média acessibilidade";
-  }
-
-  return accessibilityLabelFromColor(hex);
-}
-
-function paletteColorFromLevel(level) {
-  if (level === "Baixa acessibilidade") return ACCESS_COLORS.baixa;
-  if (level === "Média acessibilidade") return ACCESS_COLORS.media;
-  return ACCESS_COLORS.alta;
-}
-
-
-function estimateEtaMinutesFromLines(lines, conditionKey) {
-  const flat = (lines ?? []).flat();
-  if (!Array.isArray(flat) || flat.length < 2) return 0;
-
-  let meters = 0;
-  for (const line of lines) {
-    for (let i = 1; i < line.length; i++) {
-      meters += haversineMeters(line[i - 1], line[i]);
-    }
-  }
-
-  const slowKeys = new Set(["wheelchair", "elder"]);
-  const speed = slowKeys.has(conditionKey) ? 1.0 : 1.25;
-  return Math.max(1, Math.round(meters / speed / 60));
-}
-
-function buildStreetIndex(rawStreets) {
-
-  const idx = new Map();
-
-  const normPathCoord = (p) => {
-    if (Array.isArray(p) && p.length >= 2) {
-      const lng = toNum(p[0]);
-      const lat = toNum(p[1]);
-      if (lng == null || lat == null) return null;
-      return [lng, lat];
-    }
-    if (p && typeof p === "object") {
-      const lng = toNum(p.x ?? p.lng ?? p.longitude);
-      const lat = toNum(p.y ?? p.lat ?? p.latitude);
-      if (lng == null || lat == null) return null;
-      return [lng, lat];
-    }
-    return null;
-  };
-
-  (rawStreets ?? []).forEach((item) => {
-    const a = item?.attributes ?? {};
-    const g = item?.geometry ?? {};
-
-    const sp = toNum(a.StartPoint ?? a.startpoint);
-    const ep = toNum(a.EndPoint ?? a.endpoint);
-    if (sp == null || ep == null) return;
-
-    const paths = Array.isArray(g.paths) ? g.paths : [];
-    const lines = paths
-      .map((path) => (Array.isArray(path) ? path.map(normPathCoord).filter(Boolean) : []))
-      .filter((l) => l.length >= 2);
-
-    if (!lines.length) return;
-
-    const key = `${sp}-${ep}`;
-    const revKey = `${ep}-${sp}`;
-
-    idx.set(key, {
-      start: sp,
-      end: ep,
-      objectId: a.OBJECTID ?? a.objectid ?? null,
-      lines,
-    });
-
-    idx.set(revKey, {
-      start: ep,
-      end: sp,
-      objectId: a.OBJECTID ?? a.objectid ?? null,
-      lines: lines.map((l) => [...l].reverse()),
-    });
-  });
-
-  return idx;
-}
-
-function buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) {
-  if (!Array.isArray(pontos) || pontos.length < 2) return null;
-  if (!(streetsIndex instanceof Map)) return null;
-
-  const features = [];
-  const segments = [];
-  const linesForEta = [];
-
-  const lastCore = cores?.length ? String(cores[cores.length - 1]) : "#0B2D4D";
-
-  let missing = 0;
-
-  for (let i = 0; i < pontos.length - 1; i++) {
-    const a = toNum(pontos[i]);
-    const b = toNum(pontos[i + 1]);
-    if (a == null || b == null) {
-      missing++;
-      continue;
-    }
-
-    const edge = streetsIndex.get(`${a}-${b}`);
-    if (!edge?.lines?.length) {
-      missing++;
-      continue;
-    }
-
-    const apiColor = cores?.[i] != null ? String(cores[i]) : null;
-    const level = apiColor ? levelFromApiColor(apiColor) : "Alta acessibilidade";
-    const color = paletteColorFromLevel(level);
-    const index = segments.length + 1;
-
-    segments.push({ index, color, level });
-
-    const geomLines = edge.lines;
-    geomLines.forEach((ln) => linesForEta.push(ln));
-
-    features.push({
-      type: "Feature",
-      properties: { color, level, index },
-      geometry:
-        geomLines.length === 1
-          ? { type: "LineString", coordinates: geomLines[0] }
-          : { type: "MultiLineString", coordinates: geomLines },
-    });
-  }
-
-
-  if (missing > Math.max(2, Math.floor((pontos.length - 1) * 0.25))) {
-    return null;
-  }
-
-  return {
-    geojson: { type: "FeatureCollection", features },
-    segments,
-    linesForEta,
-  };
-}
-
-function buildRouteGeojsonFromCaminho(lines, cores = []) {
-  const features = [];
-  const segments = [];
-
-  const pushFeature = (coords, level) => {
-    if (!coords || coords.length < 2) return;
-    const color = paletteColorFromLevel(level);
-    const index = segments.length + 1;
-
-    segments.push({ index, color, level });
-
-    features.push({
-      type: "Feature",
-      properties: { color, level, index },
-      geometry: { type: "LineString", coordinates: coords },
-    });
-  };
-
-  const safeLines = (lines ?? []).flatMap((l) => splitLineOnGaps(l, 350));
-  if (!safeLines.length) {
-    return { geojson: { type: "FeatureCollection", features: [] }, segments: [] };
-  }
-
-  if (!Array.isArray(cores) || cores.length <= 1) {
-    safeLines.forEach((l) => pushFeature(l, "Alta acessibilidade"));
-    return { geojson: { type: "FeatureCollection", features }, segments };
-  }
-
-  let colorIdx = 0;
-
-  for (const line of safeLines) {
-    if (line.length < 2) continue;
-
-    const firstApi = cores[colorIdx] != null ? String(cores[colorIdx]) : null;
-    let currentLevel = firstApi ? levelFromApiColor(firstApi) : "Alta acessibilidade";
-    let currentCoords = [line[0]];
-
-    for (let i = 0; i < line.length - 1; i++) {
-      const edgeApi = cores[colorIdx] != null ? String(cores[colorIdx]) : null;
-      colorIdx++;
-
-      const edgeLevel = edgeApi ? levelFromApiColor(edgeApi) : "Alta acessibilidade";
-      const next = line[i + 1];
-
-      if (edgeLevel !== currentLevel && currentCoords.length >= 2) {
-        pushFeature(currentCoords, currentLevel);
-        currentLevel = edgeLevel;
-        currentCoords = [line[i]];
-      }
-
-      currentCoords.push(next);
-    }
-
-    if (currentCoords.length >= 2) pushFeature(currentCoords, currentLevel);
-  }
-
-  return { geojson: { type: "FeatureCollection", features }, segments };
+function IconCenter({ size = 22, color = "#051F41", accent = "#F09C1F" }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx="12" cy="12" r="8" stroke={color} strokeWidth={2} />
+      <Circle cx="12" cy="12" r="2.5" fill={accent} />
+      <Path d="M12 2v3" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M12 19v3" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M2 12h3" stroke={color} strokeWidth={2} strokeLinecap="round" />
+      <Path d="M19 12h3" stroke={color} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
+  );
 }
 
 
 export default function MapScreen() {
   const tabBarH = useBottomTabBarHeight();
+  const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
 
   const { condition } = useContext(UserContext) ?? {};
@@ -417,13 +259,18 @@ export default function MapScreen() {
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const [routeActive, setRouteActive] = useState(false);   
-  const [navSheetOpen, setNavSheetOpen] = useState(false); 
-  const [navSheetCollapsed, setNavSheetCollapsed] = useState(true); 
+  const [routeActive, setRouteActive] = useState(false);
+  const [navSheetOpen, setNavSheetOpen] = useState(false);
 
+  
+  const [navMode, setNavMode] = useState("idle");
+  const navModeRef = useRef("idle");
+  useEffect(() => {
+    navModeRef.current = navMode;
+  }, [navMode]);
 
-
-  const [routeGeojson, setRouteGeojson] = useState(null);
+  const [routeFullGeojson, setRouteFullGeojson] = useState(null);
+  const [routeRemainingGeojson, setRouteRemainingGeojson] = useState(null);
   const [routeSegments, setRouteSegments] = useState([]);
   const [etaMin, setEtaMin] = useState(0);
 
@@ -432,12 +279,45 @@ export default function MapScreen() {
 
   const streetsIndexRef = useRef(null);
 
-  useEffect(() => {
-    if (Platform.OS === "android") {
-      MapLibreGL.requestAndroidLocationPermissions().catch(() => {});
+  
+  const routeNormRef = useRef(null);
+  const flatCoordsRef = useRef([]);
+  const indexMapRef = useRef([]); 
+  const nearestIdxRef = useRef(0);
+
+  const headingRef = useRef(0);
+  const lastCoordRef = useRef(null);
+  const lastCamTsRef = useRef(0);
+
+ 
+  const [selectedCatIds, setSelectedCatIds] = useState([]);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+
+  
+  const { t } = useTranslation();
+
+  const categories = useMemo(() => {
+    const map = new Map();
+    for (const p of pois ?? []) {
+      if (!p?.categoryId) continue;
+      const key = categoryKeyFromName(p.categoryName ?? String(p.categoryId));
+      const prev = map.get(p.categoryId) ?? { id: p.categoryId, name: p.categoryName ?? String(p.categoryId), key,count: 0 };
+      prev.count += 1;
+      map.set(p.categoryId, prev);
     }
-    MapLibreGL.setLocationManager?.({ running: true });
-  }, []);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [pois]);
+
+  const filteredPois = useMemo(() => {
+    if (!selectedCatIds.length) return pois ?? [];
+    const s = new Set(selectedCatIds);
+    return (pois ?? []).filter((p) => s.has(p.categoryId));
+  }, [pois, selectedCatIds]);
+
+  const toggleCat = (id) => {
+    setSelectedCatIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
 
 
   useEffect(() => {
@@ -454,7 +334,6 @@ export default function MapScreen() {
       alive = false;
     };
   }, []);
-
 
   useEffect(() => {
     let alive = true;
@@ -473,14 +352,228 @@ export default function MapScreen() {
     };
   }, []);
 
-  const onUserLocationUpdate = (location) => {
-    const c = [location?.coords?.longitude, location?.coords?.latitude];
-    if (!c[0] || !c[1]) return;
+  // ====== map style (remove default POI icons) ======
+  const [mapStyle, setMapStyle] = useState(MAP_STYLE_URL);
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const res = await fetch(MAP_STYLE_URL);
+        const style = await res.json();
+        style.layers = (style.layers ?? []).filter((l) => {
+          const hasIcon = !!l?.layout?.["icon-image"];
+          return !(l?.type === "symbol" && hasIcon);
+        });
+        if (alive) setMapStyle(style);
+      } catch (e) {
+        console.warn("[Mob2is] Falha ao carregar estilo, a usar URL normal:", e);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // ====== location watch (SÓ isto -> acaba o “duas bolas”) ======
+  useEffect(() => {
+    let watchId = null;
+    let alive = true;
+
+    const start = async () => {
+      try {
+        if (Platform.OS === "android") {
+          const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
+          const already = await PermissionsAndroid.check(fine);
+          const granted = already ? PermissionsAndroid.RESULTS.GRANTED : await PermissionsAndroid.request(fine);
+
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            console.warn("[Mob2is] Permissão de localização recusada.");
+            return;
+          }
+        }
+
+        watchId = Geolocation.watchPosition(
+          (pos) => {
+            if (!alive) return;
+            const { longitude, latitude } = pos.coords || {};
+            applyLocation(longitude, latitude);
+          },
+          (err) => console.warn("[Mob2is] watchPosition error:", err),
+          {
+            enableHighAccuracy: true,
+            distanceFilter: 1,
+            interval: 1000,
+            fastestInterval: 700,
+            forceRequestLocation: true,
+            showLocationDialog: true,
+          }
+        );
+      } catch (e) {
+        console.warn("[Mob2is] start watch error:", e);
+      }
+    };
+
+    start();
+
+    return () => {
+      alive = false;
+      if (watchId != null) Geolocation.clearWatch(watchId);
+      Geolocation.stopObserving?.();
+    };
+  }, []);
+
+  // ====== camera helpers ======
+  const setCam = (opts) => {
+    if (!cameraRef.current?.setCamera) return;
+    cameraRef.current.setCamera({
+      animationMode: "easeTo",
+      animationDuration: 250,
+      ...opts,
+    });
+  };
+
+  const resetCamera = (center = userCoord ?? VIANA_COORDS) => {
+    setCam({
+      centerCoordinate: center,
+      zoomLevel: 15,
+      pitch: 0,
+      heading: 0,
+      animationMode: "flyTo",
+      animationDuration: 650,
+    });
+  };
+
+  // ====== build route cache for “remaining” ======
+  const rebuildRouteCache = (routeFcNormalized) => {
+    routeNormRef.current = routeFcNormalized;
+    flatCoordsRef.current = [];
+    indexMapRef.current = [];
+    nearestIdxRef.current = 0;
+
+    const feats = routeFcNormalized?.features ?? [];
+    for (let fi = 0; fi < feats.length; fi++) {
+      const coords = feats[fi]?.geometry?.coordinates ?? [];
+      for (let ci = 0; ci < coords.length; ci++) {
+        flatCoordsRef.current.push(coords[ci]);
+        indexMapRef.current.push({ featureIndex: fi, coordIndex: ci });
+      }
+    }
+
+    // default remaining = full
+    setRouteRemainingGeojson(routeFcNormalized);
+  };
+
+  const buildRemainingFromIndex = (globalIdx) => {
+    const norm = routeNormRef.current;
+    if (!norm?.features?.length) return norm;
+
+    const mapItem = indexMapRef.current[globalIdx];
+    if (!mapItem) return norm;
+
+    const curF = mapItem.featureIndex;
+    const curC = mapItem.coordIndex;
+
+    const out = [];
+    for (let fi = curF; fi < norm.features.length; fi++) {
+      const f = norm.features[fi];
+      const coords = f?.geometry?.coordinates ?? [];
+      const sliced = fi === curF ? coords.slice(Math.max(0, curC)) : coords;
+
+      if (sliced.length >= 2) {
+        out.push({
+          type: "Feature",
+          properties: { ...(f.properties ?? {}) }, // mantém "color"
+          geometry: { type: "LineString", coordinates: sliced },
+        });
+      }
+    }
+
+    return { type: "FeatureCollection", features: out };
+  };
+
+  const updateNavProgress = (userC) => {
+    const flat = flatCoordsRef.current;
+    if (!flat?.length) return;
+
+    const lastIdx = nearestIdxRef.current ?? 0;
+
+    // procura numa janela à volta do último idx (mais rápido)
+    const W = 220;
+    let from = Math.max(0, lastIdx - W);
+    let to = Math.min(flat.length - 1, lastIdx + W);
+
+    let bestIdx = lastIdx;
+    let bestD = Infinity;
+
+    for (let i = from; i <= to; i++) {
+      const d = haversineMeters(userC, flat[i]);
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
+    }
+
+    // se estivermos muito longe da janela (teleporte), faz scan completo
+    if (bestD > 60) {
+      bestD = Infinity;
+      bestIdx = lastIdx;
+      for (let i = 0; i < flat.length; i += 2) {
+        const d = haversineMeters(userC, flat[i]);
+        if (d < bestD) {
+          bestD = d;
+          bestIdx = i;
+        }
+      }
+    }
+
+    // não andar para trás e evita updates “micro”
+    if (bestIdx <= lastIdx) return;
+    if (bestIdx - lastIdx < 3) return;
+
+    nearestIdxRef.current = bestIdx;
+    setRouteRemainingGeojson(buildRemainingFromIndex(bestIdx));
+  };
+
+  const setFollowCamera = (c, force = false) => {
+    const now = Date.now();
+    if (!force && now - lastCamTsRef.current < 280) return;
+    lastCamTsRef.current = now;
+
+    // heading suave a partir do movimento real
+    const prev = lastCoordRef.current;
+    if (prev) {
+      const d = haversineMeters(prev, c);
+      if (d < 0.8 && !force) return;
+
+      const b = bearingDeg(prev, c);
+      headingRef.current = lerpAngle(headingRef.current, b, 0.22);
+    }
+    lastCoordRef.current = c;
+
+    updateNavProgress(c);
+
+    const centerAhead = offsetForwardMeters(c, headingRef.current, 28);
+
+    setCam({
+      centerCoordinate: centerAhead,
+      zoomLevel: 18.1,
+      pitch: 68,
+      heading: headingRef.current,
+      animationMode: "easeTo",
+      animationDuration: 220,
+    });
+  };
+
+  const applyLocation = (lng, lat) => {
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+    const c = [lng, lat];
     setUserCoord(c);
 
-    if (!didCenterOnUser.current && cameraRef.current?.setCamera) {
+    if (!didCenterOnUser.current) {
       didCenterOnUser.current = true;
-      cameraRef.current.setCamera({
+      setCam({
         centerCoordinate: c,
         zoomLevel: 15,
         pitch: 0,
@@ -491,30 +584,19 @@ export default function MapScreen() {
       return;
     }
 
-    if (routeActive  && cameraRef.current?.setCamera) {
-      cameraRef.current.setCamera({
-        centerCoordinate: c,
-        zoomLevel: 16,
-        pitch: 55,
-        heading: -15,
-        animationMode: "easeTo",
-        animationDuration: 250,
-      });
+    if (navModeRef.current === "follow") {
+      setFollowCamera(c);
     }
   };
 
-  const poisFeature = useMemo(() => {
+  // ====== map layers sources ======
+  const userFeature = useMemo(() => {
+    if (!userCoord) return { type: "FeatureCollection", features: [] };
     return {
       type: "FeatureCollection",
-      features: (pois ?? [])
-        .filter((p) => Array.isArray(p?.coords))
-        .map((p) => ({
-          type: "Feature",
-          properties: { id: String(p.id) },
-          geometry: { type: "Point", coordinates: p.coords },
-        })),
+      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: userCoord } }],
     };
-  }, [pois]);
+  }, [userCoord]);
 
   const selectedFeature = useMemo(() => {
     if (!selectedPoi?.coords) return { type: "FeatureCollection", features: [] };
@@ -524,32 +606,92 @@ export default function MapScreen() {
     };
   }, [selectedPoi]);
 
-  const userFeature = useMemo(() => {
-    if (!userCoord) return { type: "FeatureCollection", features: [] };
-    return {
-      type: "FeatureCollection",
-      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: userCoord } }],
-    };
-  }, [userCoord]);
-
+  // ====== UI actions ======
   const pickDestination = (poi) => {
     setSelectedPoi(poi);
     setDetailsOpen(true);
+
     setRouteActive(false);
     setNavSheetOpen(false);
-    setNavSheetCollapsed(true);
-    setRouteGeojson(null);
+    setNavMode("idle");
+
+    setRouteFullGeojson(null);
+    setRouteRemainingGeojson(null);
+    routeNormRef.current = null;
+    flatCoordsRef.current = [];
+    indexMapRef.current = [];
+    nearestIdxRef.current = 0;
+
+    headingRef.current = 0;
+    lastCoordRef.current = null;
+
+    if (poi?.coords) {
+      setCam({
+        centerCoordinate: poi.coords,
+        zoomLevel: 15.2,
+        pitch: 0,
+        heading: 0,
+        animationMode: "flyTo",
+        animationDuration: 650,
+      });
+    }
+  };
+
+  const startFollow = () => {
+    setNavMode("follow");
+    setNavSheetOpen(false);
+
+    // garantir “remaining” começa no full
+    if (routeNormRef.current) {
+      setRouteRemainingGeojson(routeNormRef.current);
+      nearestIdxRef.current = 0;
+    }
+
+    if (userCoord) {
+      // força um update imediato para evitar “saltos”
+      lastCamTsRef.current = 0;
+      setFollowCamera(userCoord, true);
+    }
+  };
+
+  const openNavigationSheet = () => setNavSheetOpen(true);
+  const closeNavigationSheet = () => setNavSheetOpen(false);
+
+  const clearRoute = () => {
+    setNavMode("idle");
+    headingRef.current = 0;
+    lastCoordRef.current = null;
+    nearestIdxRef.current = 0;
+
+    resetCamera(userCoord ?? VIANA_COORDS);
+
+    setRouteActive(false);
+    setNavSheetOpen(false);
+
+    setRouteFullGeojson(null);
+    setRouteRemainingGeojson(null);
     setRouteSegments([]);
+    setEtaMin(0);
+
+    setDetailsOpen(false);
+    setSelectedPoi(null);
+
+    routeNormRef.current = null;
+    flatCoordsRef.current = [];
+    indexMapRef.current = [];
   };
 
-  const onPressPoi = (e) => {
-    const f = e?.features?.[0];
-    const id = f?.properties?.id;
-    if (!id) return;
-    const poi = pois.find((p) => String(p.id) === String(id));
-    if (poi) pickDestination(poi);
+  const centerBtnPress = () => {
+    if (!userCoord) return;
+    if (navModeRef.current === "follow") {
+      lastCamTsRef.current = 0;
+      setFollowCamera(userCoord, true);
+    } else {
+      resetCamera(userCoord);
+    }
   };
 
+  // ====== route build ======
   const startNavigation = async (poi) => {
     if (!poi?.coords) return;
 
@@ -562,8 +704,8 @@ export default function MapScreen() {
       poi.graphPointId != null
         ? Number(poi.graphPointId)
         : Number.isFinite(Number(poi.id))
-          ? Number(poi.id)
-          : null;
+        ? Number(poi.id)
+        : null;
 
     try {
       const resp = await calculateRoute({
@@ -579,65 +721,68 @@ export default function MapScreen() {
       const pontos = Array.isArray(resp?.pontos) ? resp.pontos : null;
       const streetsIndex = streetsIndexRef.current;
 
+      // 1) prefer ponto+streets
       const builtFromPontos = pontos && streetsIndex ? buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) : null;
 
       if (builtFromPontos?.geojson?.features?.length) {
-        setRouteGeojson(builtFromPontos.geojson);
+        const norm = normalizeRouteGeojson(builtFromPontos.geojson);
+        setRouteFullGeojson(norm);
+        rebuildRouteCache(norm);
+
         setRouteSegments(builtFromPontos.segments);
         setEtaMin(estimateEtaMinutesFromLines(builtFromPontos.linesForEta, condition));
+
         setRouteActive(true);
+        setNavMode("preview");
         setNavSheetOpen(true);
-        setNavSheetCollapsed(true); 
         setDetailsOpen(false);
-        setDetailsOpen(false);
- 
+
+        // preview camera (um pouco mais perto)
         const midLine = builtFromPontos.linesForEta[Math.floor(builtFromPontos.linesForEta.length / 2)];
         const midCoord = midLine?.[Math.floor(midLine.length / 2)] ?? builtFromPontos.linesForEta[0]?.[0];
-        if (midCoord && cameraRef.current?.setCamera) {
-          cameraRef.current.setCamera({
+        if (midCoord) {
+          setCam({
             centerCoordinate: midCoord,
-            zoomLevel: 15.5,
-            pitch: 35,
+            zoomLevel: 16.8,
+            pitch: 48,
             heading: 0,
             animationMode: "flyTo",
             animationDuration: 700,
           });
         }
 
-        console.log("[Mob2is] route drawn via pontos+streets:", builtFromPontos.segments.length, "segments");
         return;
       }
 
-
+      // 2) fallback caminho
       const lines = extractLinesFromCaminho(resp?.caminho);
       const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
-
-      const totalPoints = safeLines.reduce((acc, l) => acc + l.length, 0);
-      console.log("[Mob2is] fallback caminho lines:", safeLines.length, "points:", totalPoints, "cores:", cores.length);
-
       if (!safeLines.length) {
-        console.warn("[Mob2is] Rota sem coordenadas suficientes. Exemplo resp:", resp);
+        console.warn("[Mob2is] Rota sem coordenadas suficientes.", resp);
         return;
       }
 
       const built = buildRouteGeojsonFromCaminho(safeLines, cores);
+      const norm = normalizeRouteGeojson(built.geojson);
 
-      setRouteGeojson(built.geojson);
+      setRouteFullGeojson(norm);
+      rebuildRouteCache(norm);
+
       setRouteSegments(built.segments);
       setEtaMin(estimateEtaMinutesFromLines(safeLines, condition));
-      setRouteActive(true);
-      setNavSheetOpen(true);
-      setNavSheetCollapsed(true);
-      setDetailsOpen(false);
 
+      setRouteActive(true);
+      setNavMode("preview");
+      setNavSheetOpen(true);
+      setDetailsOpen(false);
 
       const midLine = safeLines[Math.floor(safeLines.length / 2)];
       const midCoord = midLine?.[Math.floor(midLine.length / 2)] ?? safeLines[0]?.[0];
-      if (midCoord && cameraRef.current?.setCamera) {
-        cameraRef.current.setCamera({
+      if (midCoord) {
+        setCam({
           centerCoordinate: midCoord,
-          zoomLevel: 15.5,
-          pitch: 35,
+          zoomLevel: 16.8,
+          pitch: 48,
           heading: 0,
           animationMode: "flyTo",
           animationDuration: 700,
@@ -648,75 +793,45 @@ export default function MapScreen() {
     }
   };
 
-  const closeNavigationSheet = () => {
-    setNavSheetOpen(false);
-    setNavSheetCollapsed(true);
-  };
-
-  const clearRoute = () => {
-    setRouteActive(false);
-    setNavSheetOpen(false);
-    setNavSheetCollapsed(true);
-    setRouteGeojson(null);
-    setRouteSegments([]);
-    setDetailsOpen(false);
-    setSelectedPoi(null);
-    setEtaMin(0);
-  };
-
+  // ✅ isto substitui o teu “navRemainingGeojson”
+  const routeShape = navMode === "follow" ? routeRemainingGeojson : routeFullGeojson;
 
   return (
     <View style={styles.page}>
       <MapLibreGL.MapView
         style={styles.map}
-        mapStyle={MAP_STYLE}
+        mapStyle={mapStyle}
         logoEnabled={false}
         attributionEnabled={false}
         preferredFramesPerSecond={30}
         surfaceView={true}
       >
-        <MapLibreGL.UserLocation visible={false} onUpdate={onUserLocationUpdate} />
-
         <MapLibreGL.Camera
           ref={cameraRef}
-          centerCoordinate={selectedPoi?.coords ?? userCoord ?? VIANA_COORDS}
-          zoomLevel={routeActive ? 16 : 15}
-          pitch={routeActive ? 55 : 0}
-          heading={routeActive ? -15 : 0}
-          animationMode="flyTo"
-          animationDuration={650}
+          defaultSettings={{
+            centerCoordinate: VIANA_COORDS,
+            zoomLevel: 15,
+            pitch: 0,
+            heading: 0,
+          }}
         />
 
-        <MapLibreGL.ShapeSource id="pois" shape={poisFeature} onPress={onPressPoi} hitbox={{ width: 18, height: 18 }}>
-          <MapLibreGL.CircleLayer
-            id="pois-dot"
-            style={{
-              circleRadius: 5,
-              circleColor: "#0B2D4D",
-              circleOpacity: 0.95,
-              circleStrokeWidth: 2,
-              circleStrokeColor: "#FFFFFF",
-              circlePitchAlignment: "map",
-            }}
-          />
-        </MapLibreGL.ShapeSource>
-
-      
-        <MapLibreGL.ShapeSource id="user-src" shape={userFeature}>
+        {/* USER (um só ponto) */}
+        <MapLibreGL.ShapeSource id="user" shape={userFeature}>
           <MapLibreGL.CircleLayer
             id="user-halo"
             style={{
-              circleRadius: 14,
-              circleColor: "#F18F01",
-              circleOpacity: 0.22,
+              circleRadius: 15,
+              circleColor: "#F09C1F",
+              circleOpacity: 0.18,
               circlePitchAlignment: "map",
             }}
           />
           <MapLibreGL.CircleLayer
             id="user-dot"
             style={{
-              circleRadius: 8,
-              circleColor: "#F18F01",
+              circleRadius: 7,
+              circleColor: "#1579B3",
               circleStrokeWidth: 3,
               circleStrokeColor: "#FFFFFF",
               circlePitchAlignment: "map",
@@ -724,7 +839,23 @@ export default function MapScreen() {
           />
         </MapLibreGL.ShapeSource>
 
-        {/* Destino selecionado */}
+        {/* POIs */}
+        {(filteredPois ?? [])
+          .filter((p) => Array.isArray(p?.coords))
+          .map((p) => (
+            <MapLibreGL.PointAnnotation
+              key={`poi-${p.id}`}
+              id={`poi-${p.id}`}
+              coordinate={p.coords}
+              onSelected={() => pickDestination(p)}
+            >
+              <View style={styles.poiMarker}>
+                <PoiSvgIcon name={iconNameForPoi(p)} size={18} />
+              </View>
+            </MapLibreGL.PointAnnotation>
+          ))}
+
+        {/* destino */}
         <MapLibreGL.ShapeSource id="selected-dest" shape={selectedFeature}>
           <MapLibreGL.CircleLayer
             id="dest-halo"
@@ -747,15 +878,15 @@ export default function MapScreen() {
           />
         </MapLibreGL.ShapeSource>
 
-
-        {routeActive && routeGeojson ? (
-          <MapLibreGL.ShapeSource id="route" shape={routeGeojson}>
+        {/* rota (cores mantidas com ["get","color"]) */}
+        {routeActive && routeShape?.features?.length ? (
+          <MapLibreGL.ShapeSource id="route" shape={routeShape}>
             <MapLibreGL.LineLayer
               id="route-shadow"
               style={{
                 lineWidth: 11,
                 lineColor: "#000000",
-                lineOpacity: 0.16,
+                lineOpacity: 0.14,
                 lineCap: "round",
                 lineJoin: "round",
               }}
@@ -774,20 +905,116 @@ export default function MapScreen() {
         ) : null}
       </MapLibreGL.MapView>
 
+ 
+      {userCoord ? (
+        <Pressable
+          onPress={centerBtnPress}
+          style={[
+            styles.centerBtn,
+            { top: insets.top + 82 }, 
+          ]}
+          accessibilityLabel={t("a11y.map_center_user")}
+        >
+          <IconCenter />
+        </Pressable>
+      ) : null}
 
+      {!routeActive && !detailsOpen && categories.length > 1 ? (
+        <>
+          <Pressable
+            style={[styles.filterFab, { top: insets.top + 10 }]}
+            onPress={() => setFilterOpen(true)}
+            accessibilityLabel={t("a11y.map_open_filters")}
+          >
+            <Text style={styles.filterFabTitle}>{t("map.filters_title")}</Text>
+            <Text style={styles.filterFabSub}>
+              {selectedCatIds.length
+                  ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
+                  : t("map.summary_pois_visible", { count: filteredPois.length })}
+            </Text>
+
+            {selectedCatIds.length ? (
+              <View style={styles.filterFabBadge}>
+                <Text style={styles.filterFabBadgeText}>{selectedCatIds.length}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+
+          <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
+            <Pressable style={styles.modalBackdrop} onPress={() => setFilterOpen(false)} />
+
+            <View style={[styles.filterSheet, { paddingBottom: insets.bottom + tabBarH + 12 }]}>
+              <View style={styles.sheetHandle} />
+
+              <View style={styles.filterHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.filterTitle}>{t("map.filter_sheet_title")}</Text>
+                  <Text style={styles.filterSubtitle}>
+                    {selectedCatIds.length
+                      ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
+                      : t("map.summary_points_visible", { count: filteredPois.length })}
+
+                  </Text>
+                </View>
+
+                <Pressable onPress={() => setSelectedCatIds([])} style={styles.btnGhost}>
+                  <Text style={styles.btnGhostText}>{t("common.clear")}</Text>
+                </Pressable>
+
+                <Pressable onPress={() => setFilterOpen(false)} style={styles.btnPrimary}>
+                  <View style={styles.btnPrimaryDot} />
+                  <Text style={styles.btnPrimaryText}>{t("common.done")}</Text>
+                </Pressable>
+              </View>
+
+              <ScrollView contentContainerStyle={styles.filterGrid} showsVerticalScrollIndicator={false}>
+                {categories.map((c) => {
+                  const active = selectedCatIds.includes(c.id);
+                  const iconName = iconNameForPoi({ categoryName: c.name, categoryId: c.id });
+
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => toggleCat(c.id)}
+                      style={[styles.catCard, active && styles.catCardActive]}
+                    >
+                      <View style={[styles.catIconWrap, active && styles.catIconWrapActive]}>
+                        <PoiSvgIcon
+                          name={iconName}
+                          size={16}
+                          color={active ? "#1579B3" : "rgba(5,31,65,0.85)"}
+                        />
+                      </View>
+
+                      <Text numberOfLines={2} style={[styles.catName, active && styles.catNameActive]}>
+                        {t(`categories.${c.key}`, { defaultValue: c.name })}
+                      </Text>
+
+                      <View style={[styles.catCountPill, active && styles.catCountPillActive]}>
+                        <Text style={[styles.catCountText, active && styles.catCountTextActive]}>{c.count}</Text>
+                      </View>
+
+                      {active ? <View style={styles.catCheck} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </Modal>
+        </>
+      ) : null}
+
+     
       {routeActive && !navSheetOpen ? (
-      <Pressable
-        style={[styles.routePill, { bottom: tabBarH + 18 }]}
-        onPress={() => setNavSheetOpen(true)}
-        accessibilityLabel="Abrir detalhes da rota"
-      >
-        <View style={styles.routePillBadge} />
-        <Text style={styles.routePillText}>Detalhes da rota</Text>
-      </Pressable>
-    ) : null}
-
-
-
+        <Pressable
+          style={[styles.routePill, { bottom: tabBarH + 18 }]}
+          onPress={openNavigationSheet}
+          accessibilityLabel={t("a11y.map_open_route_details")}
+        >
+          <View style={styles.routePillBadge} />
+          <Text style={styles.routePillText}>{t("map.route_details")}</Text>
+        </Pressable>
+      ) : null}
 
       {!routeActive && !detailsOpen ? (
         <ExploreSearchPanel bottomOffset={tabBarH + 10} onPickDestination={pickDestination} />
@@ -800,14 +1027,16 @@ export default function MapScreen() {
         onStartNavigation={startNavigation}
       />
 
-     <NavigationSheet
+      <NavigationSheet
         active={routeActive && !!selectedPoi}
         open={navSheetOpen}
         bottomOffset={tabBarH + 50}
         poi={selectedPoi}
         etaMin={etaMin}
         segments={routeSegments}
+        following={navMode === "follow"}
         onClose={closeNavigationSheet}
+        onStartFollow={startFollow}
         onClear={clearRoute}
       />
     </View>
@@ -816,7 +1045,182 @@ export default function MapScreen() {
 
 const styles = StyleSheet.create({
   page: { flex: 1 },
-  map: { flex: 1 }, 
+  map: { flex: 1 },
+
+  centerBtn: {
+    position: "absolute",
+    right: 14,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(246,247,249,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.10)",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+  },
+
+  filterFab: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: "rgba(246,247,249,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.08)",
+    paddingHorizontal: 14,
+    justifyContent: "center",
+    zIndex: 120,
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  filterFabTitle: { fontWeight: "900", color: "#051F41", fontSize: 14 },
+  filterFabSub: { marginTop: 2, color: "rgba(5,31,65,0.75)", fontWeight: "800", fontSize: 12 },
+  filterFabBadge: {
+    position: "absolute",
+    right: 12,
+    top: 14,
+    height: 28,
+    minWidth: 28,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: "#F09C1F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  filterFabBadgeText: { color: "#051F41", fontWeight: "900" },
+
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(5,31,65,0.28)" },
+
+  filterSheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(243,245,247,0.99)",
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.08)",
+    paddingTop: 10,
+    paddingHorizontal: 14,
+    elevation: 26,
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -10 },
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(11,45,77,0.16)",
+    marginBottom: 10,
+  },
+  filterHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 12 },
+  filterTitle: { fontWeight: "900", fontSize: 16, color: "#051F41" },
+  filterSubtitle: { marginTop: 2, fontWeight: "800", fontSize: 12, color: "rgba(5,31,65,0.62)" },
+
+  btnGhost: {
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(21,121,179,0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  btnGhostText: { fontWeight: "900", color: "#1579B3" },
+
+  btnPrimary: {
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    backgroundColor: "#1579B3",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  btnPrimaryDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#F09C1F" },
+  btnPrimaryText: { fontWeight: "900", color: "#FFFFFF" },
+
+  filterGrid: { paddingBottom: 18, flexDirection: "row", flexWrap: "wrap", gap: 12 },
+
+  catCard: {
+    width: "48%",
+    minHeight: 62,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.08)",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  catCheck: {
+    position: "absolute",
+    right: 10,
+    top: 10,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#39A25D",
+  },
+  catCardActive: { backgroundColor: "rgba(21,121,179,0.10)", borderColor: "rgba(21,121,179,0.55)" },
+  catIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(5,31,65,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  catIconWrapActive: { backgroundColor: "rgba(21,121,179,0.14)" },
+  catName: { flex: 1, fontWeight: "900", color: "#051F41", fontSize: 13 },
+  catNameActive: { color: "#051F41" },
+  catCountPill: {
+    height: 26,
+    minWidth: 30,
+    paddingHorizontal: 9,
+    borderRadius: 13,
+    backgroundColor: "rgba(5,31,65,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  catCountPillActive: { backgroundColor: "rgba(240,156,31,0.22)", borderWidth: 1, borderColor: "rgba(240,156,31,0.55)" },
+  catCountText: { fontWeight: "900", color: "rgba(5,31,65,0.78)" },
+  catCountTextActive: { color: "#051F41" },
+
+  poiMarker: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderWidth: 2,
+    borderColor: "rgba(11,45,77,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+
   routePill: {
     position: "absolute",
     right: 16,
@@ -824,9 +1228,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 22,
-    backgroundColor: "#051F41",               
+    backgroundColor: "#051F41",
     borderWidth: 1,
-    borderColor: "rgba(21,121,179,0.45)",       
+    borderColor: "rgba(21,121,179,0.45)",
     flexDirection: "row",
     alignItems: "center",
     zIndex: 80,
@@ -836,22 +1240,6 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 10 },
   },
-  routePillBadge: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#F09C1F",                
-    marginRight: 10,
-  },
-  routePillText: {
-    color: "#FFFFFF",
-    fontWeight: "900",
-    fontSize: 13,
-  },
-
-
-
-
-
-
+  routePillBadge: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#F09C1F", marginRight: 10 },
+  routePillText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
 });

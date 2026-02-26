@@ -6,7 +6,11 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
-import "./src/i18n";
+import { useTranslation } from "react-i18next";
+import i18n from "./src/i18n";
+
+
+
 
 import SplashScreen from "./src/screens/SplashScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
@@ -20,7 +24,10 @@ import CustomTabBar from "./src/components/CustomTabBar";
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 const MoreStack = createNativeStackNavigator();
+
+
 const KEY = "userCondition";
+const KEY_LANG = "mob2is_lang_v1";
 
 function MoreStackNavigator() {
   return (
@@ -32,14 +39,15 @@ function MoreStackNavigator() {
 }
 
 function MainTabs() {
+  const { t } = useTranslation();
   return (
     <Tab.Navigator 
       screenOptions={{ headerShown: false }}
       tabBar={(props) => <CustomTabBar {...props} />}
     >
-      <Tab.Screen name="Explorar" component={MapScreen} options={{ tabBarLabel: "Explorar" }} />
-      <Tab.Screen name="Pesquisar" component={SearchScreen} options={{ tabBarLabel: "Pesquisar" }} />
-      <Tab.Screen name="Mais" component={MoreStackNavigator} options={{ tabBarLabel: "Mais" }} />
+      <Tab.Screen name="Explorar" component={MapScreen} options={{ tabBarLabel: t("tabs.explore") }} />
+      <Tab.Screen name="Pesquisar" component={SearchScreen} options={{ tabBarLabel: t("tabs.search") }} />
+      <Tab.Screen name="Mais" component={MoreStackNavigator} options={{ tabBarLabel: t("tabs.more") }} />
 
     </Tab.Navigator>
   );
@@ -55,8 +63,11 @@ export default function App() {
 
     (async () => {
       try {
-        const stored = await AsyncStorage.getItem(KEY);
-        if (stored) setCondition(stored);
+       const [[, storedCondition], [, storedLang]] =
+          await AsyncStorage.multiGet([KEY, KEY_LANG]);
+       if (storedLang) await i18n.changeLanguage(storedLang);
+       if (storedCondition) setCondition(storedCondition);
+
       } catch (e) {
         console.error("AsyncStorage load error:", e);
       } finally {

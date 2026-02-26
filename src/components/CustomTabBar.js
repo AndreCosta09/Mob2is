@@ -17,7 +17,7 @@ const ICONS = {
   Mais: require("../assets/mais.png"),
 };
 
-const SIDE_PAD = 20;
+const SIDE_PAD = 0;
 const BAR_HEIGHT = 66;
 const CORNER_R = 10;
 

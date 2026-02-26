@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, Pressable, Animated, Easing, Image } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useTranslation } from "react-i18next";
 
 const C = {
   bg: "#F3F5F7",
@@ -66,6 +67,7 @@ function MenuItem({ title, subtitle, icon, onPress, index }) {
 export default function MoreScreen({ navigation }) {
   const tabBarH = useBottomTabBarHeight();
   const headerIn = useRef(new Animated.Value(0)).current;
+  const { t } = useTranslation();
 
   useEffect(() => {
     Animated.timing(headerIn, {
@@ -89,15 +91,15 @@ export default function MoreScreen({ navigation }) {
           },
         ]}
       >
-        <Text style={styles.hTitle}>Mais</Text>
-        <Text style={styles.hSubtitle}>Configurações e informação</Text>
+        <Text style={styles.hTitle}>{t("more.title")}</Text>
+        <Text style={styles.hSubtitle}>{t("more.subtitle")}</Text>
       </Animated.View>
 
       <View style={styles.card}>
         <MenuItem
           index={0}
-          title="Programar Percurso"
-          subtitle="Criar rotas e preferências"
+          title={t("more.items.route.title")}
+          subtitle={t("more.items.route.subtitle")}
           icon={ICONS.route}
           onPress={() => {
             console.log("Programar Percurso");
@@ -108,8 +110,8 @@ export default function MoreScreen({ navigation }) {
 
         <MenuItem
           index={1}
-          title="Definições"
-          subtitle="Acessibilidade e idioma"
+          title={t("more.items.settings.title")}
+          subtitle={t("more.items.settings.subtitle")}
           icon={ICONS.settings}
           onPress={() => navigation.navigate("Settings")}
 
@@ -119,8 +121,8 @@ export default function MoreScreen({ navigation }) {
 
         <MenuItem
           index={2}
-          title="Termos e Condições"
-          subtitle="Privacidade e utilização"
+          title={t("more.items.terms.title")}
+          subtitle={t("more.items.terms.subtitle")}
           icon={ICONS.terms}
           onPress={() => console.log("Termos e Condições")}
         />

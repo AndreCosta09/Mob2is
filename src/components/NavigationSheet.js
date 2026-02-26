@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Path, Circle, Line } from "react-native-svg";
+import { useTranslation } from "react-i18next";
+
+
 
 
 function DotsLine({ color }) {
@@ -17,13 +20,7 @@ function DotsLine({ color }) {
 function IconChevronDown({ size = 18, color = "#fff" }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M6 9l6 6 6-6"
-        stroke={color}
-        strokeWidth={2.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <Path d="M6 9l6 6 6-6" stroke={color} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -44,43 +41,46 @@ function IconPinPlus({ size = 18, color = "#051F41", accent = "#F09C1F" }) {
   );
 }
 
+function IconPlay({ size = 18, color = "#051F41" }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M9 7.5v9l8-4.5-8-4.5Z"
+        fill={color}
+      />
+    </Svg>
+  );
+}
 
 export default function NavigationSheet({
   active,
   open,
-  collapsed,
   bottomOffset = 94,
   poi,
   etaMin = 0,
   segments = [],
-  onToggleCollapsed,
+  following = false,
   onClose,
   onClear,
+  onStartFollow,
 }) {
-  const hiddenY = 560;
-  const peekY = 220; 
-
+  const hiddenY = 900;
   const y = useRef(new Animated.Value(hiddenY)).current;
-
+  const { t } = useTranslation();
   useEffect(() => {
-   const target = !active ? hiddenY : open ? 0 : hiddenY;
-
+    const target = !active || !open ? hiddenY : 0;
 
     Animated.spring(y, {
       toValue: target,
-      damping: 20,
-      stiffness: 170,
+      damping: 22,
+      stiffness: 180,
       mass: 1,
       useNativeDriver: true,
     }).start();
   }, [active, open, y]);
 
   const legendColors = useMemo(() => {
-    return {
-      alta: "#39A25D",  
-      media: "#F0B429", 
-      baixa: "#FF4D6D", 
-    };
+    return { alta: "#39A25D", media: "#F0B429", baixa: "#FF4D6D" };
   }, []);
 
   if (!active || !poi) return null;
@@ -89,43 +89,55 @@ export default function NavigationSheet({
     <Animated.View style={[styles.wrap, { bottom: bottomOffset, transform: [{ translateY: y }] }]}>
       <View style={styles.handle} />
 
-
-      <Text style={styles.destTitle}>Destino</Text>
+      <Text style={styles.destTitle}>{t("navigation.destination")}</Text>
       <Text style={styles.destName} numberOfLines={2}>
         {poi.title}
       </Text>
 
-
       <View style={styles.metaBlock}>
-          <Text style={styles.eta}>⏱ Tempo estimado: {etaMin ? `${etaMin} min` : "- min"}</Text>
+        <Text style={styles.eta}>{etaMin ? t("navigation.eta", { min: etaMin }) : t("navigation.eta_unknown")}</Text>
 
-          <View style={styles.actions}>
-            <Pressable style={styles.actionPillDark} onPress={onClose} accessibilityLabel="Ocultar detalhes">
-              <IconChevronDown />
-              <Text style={styles.actionPillDarkText}>Ocultar</Text>
-            </Pressable>
+        {following ? (
+          <Text style={styles.followingHint}>{t("navigation.following_hint")}</Text>
+        ) : null}
 
-            <Pressable style={styles.actionPillLight} onPress={onClear} accessibilityLabel="Nova rota">
-              <IconPinPlus />
-              <Text style={styles.actionPillLightText}>Nova rota</Text>
+        <View style={styles.actions}>
+          <Pressable style={styles.actionPillDark} onPress={onClose} accessibilityLabel="Ocultar detalhes">
+            <IconChevronDown />
+            <Text style={styles.actionPillDarkText}>{t("navigation.hide")}</Text>
+          </Pressable>
+
+          {!following ? (
+            <Pressable style={styles.actionPillOrange} onPress={onStartFollow} accessibilityLabel="Iniciar rota">
+              <IconPlay />
+              <Text style={styles.actionPillOrangeText}>{t("navigation.start_route")}</Text>
             </Pressable>
-          </View>
+          ) : (
+            <View style={styles.actionChip}>
+              <View style={styles.actionChipDot} />
+              <Text style={styles.actionChipText}>{t("navigation.navigating")}</Text>
+            </View>
+          )}
+
+          <Pressable style={styles.actionPillLight} onPress={onClear} accessibilityLabel="Nova rota">
+            <IconPinPlus />
+            <Text style={styles.actionPillLightText}>{t("navigation.new_route")}</Text>
+          </Pressable>
         </View>
+      </View>
 
-
-      {/* Legenda */}
       <View style={styles.legendBox}>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.alta} />
-          <Text style={styles.legendText}>Alta acessibilidade</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_high")}</Text>
         </View>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.media} />
-          <Text style={styles.legendText}>Média acessibilidade</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_medium")}</Text>
         </View>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.baixa} />
-          <Text style={styles.legendText}>Baixa acessibilidade</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_low")}</Text>
         </View>
       </View>
     </Animated.View>
@@ -141,6 +153,10 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 14,
     elevation: 40,
+    shadowColor: "#000",
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
   handle: {
     width: 54,
@@ -164,81 +180,69 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  metaBlock: {
-  marginTop: 20,
-    },
+  metaBlock: { marginTop: 16 },
+  eta: { fontWeight: "900", color: "#6B7A88" },
+  followingHint: { marginTop: 6, fontWeight: "900", color: "#1579B3", fontSize: 12 },
 
-    metaRow: {
-      marginTop: 12,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 10,
-    },
-    eta: { fontWeight: "900", color: "#6B7A88" },
-    actions: {
+  actions: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    marginTop: 15
-
+    marginTop: 14,
+    flexWrap: "wrap",
   },
 
-actionPillDark: {
-  height: 40,
-  paddingHorizontal: 14,
-  borderRadius: 20,
-  backgroundColor: "#051F41", 
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 8,
-  elevation: 10,
-  shadowColor: "#000",
-  shadowOpacity: 0.14,
-  shadowRadius: 14,
-  shadowOffset: { width: 0, height: 8 },
-},
-
-actionPillDarkText: {
-  color: "#FFFFFF",
-  fontWeight: "900",
-  fontSize: 13,
-},
-
-actionPillLight: {
-  height: 40,
-  paddingHorizontal: 14,
-  borderRadius: 20,
-  backgroundColor: "#FFFFFF",
-  borderWidth: 1,
-  borderColor: "rgba(21,121,179,0.35)",
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 8,
-  elevation: 8,
-  shadowColor: "#000",
-  shadowOpacity: 0.08,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 6 },
-},
-
-actionPillLightText: {
-  color: "#051F41",
-  fontWeight: "900",
-  fontSize: 13,
-},
-
-
-
-  exitBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  actionPillDark: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 20,
     backgroundColor: "#051F41",
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 8,
+    elevation: 10,
   },
-  exitBtnText: { color: "#fff", fontWeight: "900" },
+  actionPillDarkText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
+
+  actionPillOrange: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "#F09C1F",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    elevation: 10,
+  },
+  actionPillOrangeText: { color: "#051F41", fontWeight: "900", fontSize: 13 },
+
+  actionPillLight: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(21,121,179,0.35)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    elevation: 8,
+  },
+  actionPillLightText: { color: "#051F41", fontWeight: "900", fontSize: 13 },
+
+  actionChip: {
+    height: 40,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "rgba(57,162,93,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(57,162,93,0.35)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  actionChipDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#39A25D" },
+  actionChipText: { fontWeight: "900", color: "#051F41", fontSize: 13 },
 
   legendBox: {
     marginTop: 12,
@@ -252,9 +256,9 @@ actionPillLightText: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 6,
-    paddingLeft: 10, 
+    paddingLeft: 10,
   },
   dotsLine: { flexDirection: "row", alignItems: "center", gap: 5, width: 72 },
   dot: { width: 9, height: 9, borderRadius: 4 },
-  legendText: { fontWeight: "900", color: "#051F41", marginLeft: 35 }, 
+  legendText: { fontWeight: "900", color: "#051F41", marginLeft: 35 },
 });

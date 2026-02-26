@@ -14,176 +14,19 @@ import {
   ScrollView
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+
+import { C, ASSETS } from "./search/constants";
+import useScreenTransition from "./search/useScreenTransition";
+import AnimatedPressable from "./search/AnimatedPressable";
+import CategoryRow from "./search/CategoryRow";
+import PoiCard from "./search/PoiCard";
+
 import { fetchCategories, fetchPoisByCategory } from "../api/mockApi";
 
 import Mob2isLogo from "../assets/logo/logo.svg";
 
-const C = {
-  bg: "#F3F5F7",
-  text: "#0B2D4D",
-  muted: "#6B7A88",
-  green: "#39A25D",
-  greenDark: "#2E8F50",
-  pill: "#E9EDF2",
-  white: "#FFFFFF",
-  shadow: "rgba(0,0,0,0.12)",
-  blue :"#1579B3",
-};
+import { useTranslation } from "react-i18next";
 
-const ASSETS = {
-  placeholder:
-    "https://images.unsplash.com/photo-1526481280695-3c687fd5432c?auto=format&fit=crop&w=1200&q=60",
-};
-
-function useScreenTransition(key) {
-  const anim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    anim.setValue(0);
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 320,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [key, anim]);
-
-  const style = {
-    opacity: anim,
-    transform: [
-      {
-        translateX: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [26, 0],
-        }),
-      },
-      {
-        translateY: anim.interpolate({
-          inputRange: [0, 1],
-          outputRange: [6, 0],
-        }),
-      },
-    ],
-  };
-
-  return style;
-}
-
-function AnimatedPressable({
-  onPress,
-  style,
-  containerStyle,
-  children,
-  disabled,
-}) {
-  const scale = useRef(new Animated.Value(1)).current;
-
-  const pressIn = () => Animated.spring(scale, { toValue: 0.985, useNativeDriver: true }).start();
-  const pressOut = () => Animated.spring(scale, { toValue: 1, useNativeDriver: true }).start();
-
-  return (
-    <Pressable
-     android_ripple={{ color: "rgba(5,31,65,0.06)" }} 
-      hitSlop={8}
-      disabled={disabled}
-      onPress={onPress}
-      onPressIn={pressIn}
-      onPressOut={pressOut}
-      style={containerStyle}
-    >
-      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
-    </Pressable>
-  );
-}
-
-
-function CategoryRow({ item, active, onPress }) {
-  const a = useRef(new Animated.Value(active ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.timing(a, {
-      toValue: active ? 1 : 0,
-      duration: 220,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: false, 
-    }).start();
-  }, [active, a]);
-
-  const bg = a.interpolate({
-    inputRange: [0, 1],
-    outputRange: [C.pill, C.green],
-  });
-
-  const txt = a.interpolate({
-    inputRange: [0, 1],
-    outputRange: [C.text, C.white],
-  });
-
-  return (
-      <AnimatedPressable
-        onPress={onPress}
-        containerStyle={styles.catPressable}
-        style={[styles.catBtn, { backgroundColor: bg }]}
-      >
-        <Animated.Text style={[styles.catText, { color: txt }]}>{item.name}</Animated.Text>
-      </AnimatedPressable>
-    );
-
-
-
-
-}
-
-function PoiCard({ item, index, onPress }) {
-  const enter = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(enter, {
-      toValue: 1,
-      duration: 360,
-      delay: index * 70,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, [enter, index]);
-
-  const style = {
-    opacity: enter,
-    transform: [
-      {
-        translateY: enter.interpolate({
-          inputRange: [0, 1],
-          outputRange: [14, 0],
-        }),
-      },
-    ],
-  };
-
-  return (
-    <Animated.View style={style}>
-      <AnimatedPressable onPress={onPress} style={styles.poiCard}>
-        <View style={styles.poiImageWrap}>
-          <Image
-            source={{ uri: item.image ?? ASSETS.placeholder }}
-            style={styles.poiImage}
-            resizeMode="cover"
-          />
-      
-  
-        </View>
-
-        <View style={styles.poiFooter}>
-          <Text style={styles.poiFooterTitle}>{item.title}</Text>
-          <View style={styles.ratingBadge}>
-            <Text style={styles.ratingBadgeText}>
-              {String(item.rating ?? 0).replace(".", ",")}
-            </Text>
-          </View>
-        </View>
-      </AnimatedPressable>
-    </Animated.View>
-  );
-}
 
 export default function SearchScreen({ navigation }) {
   const tabBarH = useBottomTabBarHeight();
@@ -196,8 +39,43 @@ export default function SearchScreen({ navigation }) {
 
   const [loadingPois, setLoadingPois] = useState(false);
 
+  const [actionsH, setActionsH] = useState(0);
 
   const heroIn = useRef(new Animated.Value(0)).current;
+
+  const { t } = useTranslation();
+
+  const categoriesUi = useMemo(() => {
+  return categories.map((cat) => ({
+    ...cat,
+    name: t(`categories.${cat.key}`, { defaultValue: cat.name }),
+  }));
+}, [categories, t]);
+
+
+
+  const norm = (s = "") =>
+    s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") 
+      .toLowerCase()
+      .trim();
+
+  const categoryKeyFromName = (name = "") => {
+    const n = norm(name);
+    if (n.includes("cultur")) return "culture";
+    if (n.includes("saud") || n.includes("hospital") || n.includes("clin")) return "health";
+    if (n.includes("transp") || n.includes("autocar") || n.includes("comboio")) return "transport";
+    if (n.includes("servic") || n.includes("public")) return "public_services";
+    if (n.includes("turism")) return "tourism";
+
+    return "other";
+  };
+
+
+
+
+
 
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -208,7 +86,13 @@ export default function SearchScreen({ navigation }) {
   useEffect(() => {
     (async () => {
       const c = await fetchCategories();
-      setCategories(c);
+      setCategories(
+        c.map((cat) => ({
+          ...cat,
+          key: cat.key ?? categoryKeyFromName(cat.name),
+        }))
+      );
+
     })();
   }, []);
 
@@ -260,6 +144,8 @@ export default function SearchScreen({ navigation }) {
 
 
 
+
+
 if (selectedPoi) {
   const bounce = {
     opacity: heroIn,
@@ -274,8 +160,11 @@ if (selectedPoi) {
   };
 
 
-  const actionsBottom = tabBarH + 10;
-  const actionsHeight = 170; 
+const actionsBottom = tabBarH + 10;
+const actionsFallback = 170; 
+const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
+
+
 
   return (
     <View style={styles.page}>
@@ -291,14 +180,13 @@ if (selectedPoi) {
       </View>
 
       <View style={{ flex: 1 }}>
-        {/* CONTEÚDO COM SCROLL */}
-        <Animated.ScrollView
-          style={[{ flex: 1 }, bounce]}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingBottom: actionsBottom + actionsHeight,
-          }}
-        >
+       <Animated.ScrollView
+            style={[{ flex: 1, marginBottom: actionsTotal }, bounce]}   
+            showsVerticalScrollIndicator={false}
+            scrollIndicatorInsets={{ bottom: actionsTotal }}          
+            contentContainerStyle={{ paddingBottom: 24 }}             
+          >
+
           <View style={styles.detailHero}>
             <Image
               source={{ uri: selectedPoi.image ?? ASSETS.placeholder }}
@@ -324,9 +212,9 @@ if (selectedPoi) {
               </View>
 
               <Text style={styles.smallHint}>
-                {selectedPoi.visits
-                  ? `Visitas guiadas: ${selectedPoi.visits}`
-                  : "Visitas guiadas por marcação"}
+                 {selectedPoi.visits
+                    ? t("search.guided_visits", { count: selectedPoi.visits })
+                    : t("search.guided_visits_booking")}
               </Text>
             </View>
 
@@ -334,14 +222,17 @@ if (selectedPoi) {
           </View>
         </Animated.ScrollView>
 
-        {/* BOTÕES FIXOS (SEM CARD) */}
-        <View style={[styles.fixedActions, { bottom: actionsBottom }]}>
+        <View
+            style={[styles.fixedActions, { bottom: actionsBottom }]}
+            onLayout={(e) => setActionsH(e.nativeEvent.layout.height)}
+          >
+
           <AnimatedPressable style={styles.primaryBtn} onPress={() => goToMap(selectedPoi)}>
-            <Text style={styles.primaryBtnText}>Ir até ao local</Text>
+            <Text style={styles.primaryBtnText}>{t("search.go_to_place")}</Text>
           </AnimatedPressable>
 
           <AnimatedPressable style={styles.secondaryBtn} onPress={() => {}}>
-            <Text style={styles.secondaryBtnText}>Navegar pelo interior</Text>
+            <Text style={styles.secondaryBtnText}>{t("search.navigate_inside")}</Text>
           </AnimatedPressable>
         </View>
       </View>
@@ -362,7 +253,7 @@ if (selectedPoi) {
           <Pressable onPress={back} style={styles.backBtn}>
             <Text style={styles.backText}>‹</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>{selectedCat.name}</Text>
+          <Text style={styles.headerTitle}> {t(`categories.${selectedCat.key}`, { defaultValue: selectedCat.name })}</Text>  
           <View style={{ width: 40 }} />
 
         </View>
@@ -370,7 +261,7 @@ if (selectedPoi) {
         <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
           {loadingPois ? (
             <View style={{ padding: 14 }}>
-              <Text style={{ color: C.muted, fontWeight: "800" }}>A carregar…</Text>
+              <Text style={{ color: C.muted, fontWeight: "800" }}>{t("common.loading")}</Text>
             </View>
           ) : (
             <FlatList
@@ -389,6 +280,8 @@ if (selectedPoi) {
   }
 
 
+
+
   return (
     <View style={styles.page}>
 
@@ -399,12 +292,12 @@ if (selectedPoi) {
       <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
         
         <FlatList
-          data={categories}
+          data={categoriesUi}
           keyExtractor={(c) => c.id}
           ListHeaderComponent={
            <View style={{ paddingTop: 10, paddingBottom: 12 }}>
                   <View style={styles.handle} />
-                  <Text style={styles.pageTitle}>Categorias</Text>
+                  <Text style={styles.pageTitle}>{t("categories.title")}</Text>
             </View>
           }
           contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: tabBarH + 40 }}

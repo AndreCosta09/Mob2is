@@ -11,10 +11,17 @@ import {
   Platform,
 } from "react-native";
 import Voice from "@react-native-voice/voice";
-
+import { useTranslation } from "react-i18next";
 import { getPOIs, searchPois } from "../api/mockApi";
 
 const EXTRA_GAP = 40;
+
+
+const fmtKm = (n) =>
+  new Intl.NumberFormat(i18n.language?.startsWith("en") ? "en-US" : "pt-PT", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(n);
 
 function norm(str) {
   return (str ?? "")
@@ -27,7 +34,6 @@ function norm(str) {
     .trim();
 }
 
-// Dice coefficient (bigrams)
 function dice(a, b) {
   if (!a || !b) return 0;
   if (a === b) return 1;
@@ -89,10 +95,11 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
-
-
   const [listening, setListening] = useState(false);
   const [heardText, setHeardText] = useState("");
+
+
+  const { i18n, t } = useTranslation();
 
   const load = async (query) => {
     const r = await searchPois(query);
@@ -151,7 +158,9 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
 
     try {
 
-      await Voice.start("pt-PT");
+     const locale = i18n.language?.startsWith("en") ? "en-US" : "pt-PT";
+     await Voice.start(locale);
+
     } catch {
       setListening(false);
     }
@@ -187,21 +196,18 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
 
   return (
     <>
-      {/* Barra no mapa */}
       <View style={[styles.panel, { bottom: bottomOffset + EXTRA_GAP }]}>
         <View style={styles.handle} />
-
         <View style={styles.searchRow}>
-          {/* Tap area para abrir modal */}
           <Pressable style={styles.searchTapArea} onPress={openModal}>
             <View style={styles.leftCircle}>
               <Text style={{ fontSize: 16 }}>🔍</Text>
             </View>
-            <Text style={styles.title}>Onde deseja ir?</Text>
+            <Text style={styles.title}>{t("exploreSearch.where_to")}</Text>
           </Pressable>
 
         
-          <Pressable style={styles.rightCircle} onPress={startVoice}>
+         <Pressable style={styles.rightCircle} onPress={startVoice} accessibilityLabel={t("a11y.voice_search")}>
             <Text style={{ color: "#fff", fontWeight: "900" }}>🎤</Text>
           </Pressable>
         </View>
@@ -211,13 +217,13 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
       <Modal visible={listening} transparent animationType="fade">
         <View style={styles.listenBackdrop}>
           <View style={styles.listenCard}>
-            <Text style={styles.listenTitle}>A ouvir…</Text>
+            <Text style={styles.listenTitle}>{t("exploreSearch.listening_title")}</Text>
             <Text style={styles.listenSub} numberOfLines={2}>
-              {heardText ? `“${heardText}”` : "Diz o destino, por exemplo: “Hospital de Santa Luzia”"}
+              {heardText ? `“${heardText}”` : t("exploreSearch.listening_hint")}
             </Text>
 
             <Pressable style={styles.listenCancel} onPress={stopVoice}>
-              <Text style={styles.listenCancelText}>Cancelar</Text>
+              <Text style={styles.listenCancelText}>{t("common.cancel")}</Text>
             </Pressable>
           </View>
         </View>
@@ -239,7 +245,7 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
             <TextInput
               value={q}
               onChangeText={setQ}
-              placeholder="Praça da..."
+              placeholder={t("exploreSearch.placeholder")}
               placeholderTextColor="#9AA3AD"
               style={styles.input}
               autoFocus
@@ -265,7 +271,7 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
                     {item.title}
                   </Text>
                   <Text style={[styles.itemSub, index === 0 && styles.itemSubActive]}>
-                    VIANA DO CASTELO, PORTUGAL
+                    {t("common.city_viana")}
                   </Text>
                 </View>
                 <Text style={[styles.km, index === 0 && styles.kmActive]}>
