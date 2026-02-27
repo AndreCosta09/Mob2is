@@ -1,5 +1,5 @@
 import { haversineMeters, splitLineOnGaps, toNum } from "./geo";
-import { levelFromApiColor, paletteColorFromLevel } from "./colors";
+import { levelFromApiValue, paletteColorFromLevel } from "./colors";
 
 export function estimateEtaMinutesFromLines(lines, conditionKey) {
   const flat = (lines ?? []).flat();
@@ -51,17 +51,8 @@ export function buildStreetIndex(rawStreets) {
 
     if (!lines.length) return;
 
-    const key = `${sp}-${ep}`;
-    const revKey = `${ep}-${sp}`;
-
-    idx.set(key, {
-      start: sp,
-      end: ep,
-      objectId: a.OBJECTID ?? a.objectid ?? null,
-      lines,
-    });
-
-    idx.set(revKey, {
+    idx.set(`${sp}-${ep}`, { start: sp, end: ep, objectId: a.OBJECTID ?? a.objectid ?? null, lines });
+    idx.set(`${ep}-${sp}`, {
       start: ep,
       end: sp,
       objectId: a.OBJECTID ?? a.objectid ?? null,
@@ -72,7 +63,7 @@ export function buildStreetIndex(rawStreets) {
   return idx;
 }
 
-export function buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) {
+export function buildRouteGeojsonFromPontos(pontos, accessArray, streetsIndex) {
   if (!Array.isArray(pontos) || pontos.length < 2) return null;
   if (!(streetsIndex instanceof Map)) return null;
 
@@ -96,29 +87,25 @@ export function buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) {
       continue;
     }
 
-    const apiColor = cores?.[i] != null ? String(cores[i]) : null;
-    const level = apiColor ? levelFromApiColor(apiColor) : "Alta acessibilidade";
+    const level = levelFromApiValue(accessArray?.[i]);
     const color = paletteColorFromLevel(level);
     const index = segments.length + 1;
 
     segments.push({ index, color, level });
 
-    const geomLines = edge.lines;
-    geomLines.forEach((ln) => linesForEta.push(ln));
+    edge.lines.forEach((ln) => linesForEta.push(ln));
 
     features.push({
       type: "Feature",
       properties: { color, level, index },
       geometry:
-        geomLines.length === 1
-          ? { type: "LineString", coordinates: geomLines[0] }
-          : { type: "MultiLineString", coordinates: geomLines },
+        edge.lines.length === 1
+          ? { type: "LineString", coordinates: edge.lines[0] }
+          : { type: "MultiLineString", coordinates: edge.lines },
     });
   }
 
-  if (missing > Math.max(2, Math.floor((pontos.length - 1) * 0.25))) {
-    return null;
-  }
+  if (missing > Math.max(2, Math.floor((pontos.length - 1) * 0.25))) return null;
 
   return {
     geojson: { type: "FeatureCollection", features },
@@ -127,7 +114,7 @@ export function buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) {
   };
 }
 
-export function buildRouteGeojsonFromCaminho(lines, cores = []) {
+export function buildRouteGeojsonFromCaminho(lines, accessArray = []) {
   const features = [];
   const segments = [];
 
@@ -145,12 +132,27 @@ export function buildRouteGeojsonFromCaminho(lines, cores = []) {
     });
   };
 
-  const safeLines = (lines ?? []).flatMap((l) => splitLineOnGaps(l, 350));
-  if (!safeLines.length) {
-    return { geojson: { type: "FeatureCollection", features: [] }, segments: [] };
+  const rawLines = Array.isArray(lines) ? lines.filter((l) => Array.isArray(l) && l.length >= 2) : [];
+  if (!rawLines.length) return { geojson: { type: "FeatureCollection", features: [] }, segments: [] };
+
+  const isPerSegment =
+    Array.isArray(accessArray) &&
+    accessArray.length === rawLines.length &&
+    accessArray.every((v) => Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 3);
+
+  if (isPerSegment) {
+    for (let i = 0; i < rawLines.length; i++) {
+      const level = levelFromApiValue(accessArray[i]); 
+      const parts = splitLineOnGaps(rawLines[i], 350);
+      parts.forEach((p) => pushFeature(p, level));
+    }
+    return { geojson: { type: "FeatureCollection", features }, segments };
   }
 
-  if (!Array.isArray(cores) || cores.length <= 1) {
+  const safeLines = rawLines.flatMap((l) => splitLineOnGaps(l, 350));
+  if (!safeLines.length) return { geojson: { type: "FeatureCollection", features: [] }, segments: [] };
+
+  if (!Array.isArray(accessArray) || accessArray.length <= 1) {
     safeLines.forEach((l) => pushFeature(l, "Alta acessibilidade"));
     return { geojson: { type: "FeatureCollection", features }, segments };
   }
@@ -160,15 +162,13 @@ export function buildRouteGeojsonFromCaminho(lines, cores = []) {
   for (const line of safeLines) {
     if (line.length < 2) continue;
 
-    const firstApi = cores[colorIdx] != null ? String(cores[colorIdx]) : null;
-    let currentLevel = firstApi ? levelFromApiColor(firstApi) : "Alta acessibilidade";
+    let currentLevel = levelFromApiValue(accessArray[colorIdx]);
     let currentCoords = [line[0]];
 
     for (let i = 0; i < line.length - 1; i++) {
-      const edgeApi = cores[colorIdx] != null ? String(cores[colorIdx]) : null;
+      const edgeLevel = levelFromApiValue(accessArray[colorIdx]);
       colorIdx++;
 
-      const edgeLevel = edgeApi ? levelFromApiColor(edgeApi) : "Alta acessibilidade";
       const next = line[i + 1];
 
       if (edgeLevel !== currentLevel && currentCoords.length >= 2) {

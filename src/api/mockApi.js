@@ -169,6 +169,24 @@ export async function calculateRoute({ incapacidade, end, lati, longi, latE, lng
   return httpPostJson("/calculateRoute", payload, { timeoutMs: 30000 });
 }
 
+export async function calculateRouteMultiObjective({
+  incapacidade,
+  end,
+  lati,
+  longi,
+  latE,
+  lngE,
+  perfil = null,
+} = {}) {
+  const payload = { incapacidade, end, lati, longi, latE, lngE, perfil };
+  Object.keys(payload).forEach((k) => {
+    if (payload[k] === null || payload[k] === undefined) delete payload[k];
+  });
+  return httpPostJson("/calculateRouteMultiObjective", payload, { timeoutMs: 30000 });
+}
+
+
+
 function mapTaxiFromApi(item) {
   const a = item?.attributes ?? {};
   const g = item?.geometry ?? {};

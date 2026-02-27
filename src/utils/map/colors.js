@@ -1,7 +1,8 @@
 export const ACCESS_COLORS = {
-  alta: "#FF4D6D",
-  media: "#F0B429",
-  baixa: "#39A25D",
+  alta: "#39A25D",     
+  media: "#F0B429",   
+  baixa: "#FF4D6D",    
+  none: "#9AA3AD",    
 };
 
 export function hexToRgb(hex) {
@@ -62,15 +63,29 @@ export function levelFromApiColor(hex) {
   const l = rgbLuma(rgb);
 
   if (h >= 80 && h <= 170) return "Alta acessibilidade";
-  if (h >= 170 && h <= 260) {
-    return l < 0.42 ? "Baixa acessibilidade" : "Média acessibilidade";
-  }
-
+  if (h >= 170 && h <= 260) return l < 0.42 ? "Baixa acessibilidade" : "Média acessibilidade";
   return accessibilityLabelFromColor(hex);
 }
 
+export function levelFromApiAccessLevel(n) {
+  const v = Number(n);
+  if (v === 3) return "Alta acessibilidade";
+  if (v === 2) return "Média acessibilidade";
+  if (v === 1) return "Baixa acessibilidade";
+  if (v === 0) return "Sem dados";
+  return null;
+}
 export function paletteColorFromLevel(level) {
+  if (level === "Sem dados") return ACCESS_COLORS.none;
   if (level === "Baixa acessibilidade") return ACCESS_COLORS.baixa;
   if (level === "Média acessibilidade") return ACCESS_COLORS.media;
   return ACCESS_COLORS.alta;
+}
+
+
+export function levelFromApiValue(v) {
+  const n = Number(v);
+  if (Number.isFinite(n) && n >= 0 && n <= 3) return levelFromApiAccessLevel(n);
+  if (v == null) return "Alta acessibilidade";
+  return levelFromApiColor(String(v));
 }

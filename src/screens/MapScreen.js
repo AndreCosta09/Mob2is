@@ -1,43 +1,22 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Platform,
-  View,
-  StyleSheet,
-  Pressable,
-  Text,
-  ScrollView,
-  Modal,
-  PermissionsAndroid,
-} from "react-native";
-import Geolocation from "react-native-geolocation-service";
+import { View, StyleSheet, Pressable, Text, ScrollView, Modal } from "react-native";
+
 import MapLibreGL from "@maplibre/maplibre-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 
 import { UserContext } from "../context/UserContext";
-import { calculateRoute, getClassifiedStreets, getPOIs, VIANA_COORDS } from "../api/mockApi";
+import { getPOIs, VIANA_COORDS } from "../api/mockApi";
 
-import Svg, { Path, Circle, Rect, Line } from "react-native-svg";
-
+import { PoiSvgIcon, IconCenter } from "../components/PoiIcons";
+import useRouteNavigation from "../hooks/useRouteNavigation";
 import ExploreSearchPanel from "../components/ExploreSearchPanel";
 import PoiDetailsSheet from "../components/PoiDetailsSheet";
 import NavigationSheet from "../components/NavigationSheet";
 
-import { extractLinesFromCaminho, splitLineOnGaps } from "../utils/map/geo";
-import {
-  buildStreetIndex,
-  buildRouteGeojsonFromPontos,
-  buildRouteGeojsonFromCaminho,
-  estimateEtaMinutesFromLines,
-} from "../utils/map/route";
-
-import { useTranslation } from "react-i18next";
-
-
 const MAPTILER_KEY = "sZvLsgabyQeCL0ehvC55";
 const MAP_STYLE_URL = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`;
-
-
 
 function normTxt(s) {
   return (s ?? "")
@@ -75,234 +54,51 @@ function categoryKeyFromName(nameOrId) {
   return "other";
 }
 
-
-
-function mapConditionToIncapacidade(conditionKey) {
-  if (conditionKey === "asd") return "Autismo";
-  if (conditionKey === "visual") return "Invisual";
-  return "MobReduzida";
-}
-
-function haversineMeters([lng1, lat1], [lng2, lat2]) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function bearingDeg([lng1, lat1], [lng2, lat2]) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const toDeg = (r) => (r * 180) / Math.PI;
-
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const Δλ = toRad(lng2 - lng1);
-
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
-
-  const θ = Math.atan2(y, x);
-  return (toDeg(θ) + 360) % 360;
-}
-
-function lerpAngle(a, b, t) {
-  const d = ((b - a + 540) % 360) - 180;
-  return (a + d * t + 360) % 360;
-}
-
-
-function offsetForwardMeters([lng, lat], headingDeg, meters) {
-
-  const rad = (headingDeg * Math.PI) / 180;
-  const dLat = (meters * Math.cos(rad)) / 111320;
-  const dLng = (meters * Math.sin(rad)) / (111320 * Math.cos((lat * Math.PI) / 180));
-  return [lng + dLng, lat + dLat];
-}
-
-function normalizeRouteGeojson(fc) {
-  if (!fc?.features?.length) return { type: "FeatureCollection", features: [] };
-
-  const out = [];
-  for (const f of fc.features) {
-    if (!f?.geometry) continue;
-
-    if (f.geometry.type === "LineString") {
-      out.push(f);
-      continue;
-    }
-    if (f.geometry.type === "MultiLineString") {
-      for (const coords of f.geometry.coordinates ?? []) {
-        out.push({
-          type: "Feature",
-          properties: { ...(f.properties ?? {}) },
-          geometry: { type: "LineString", coordinates: coords },
-        });
-      }
-    }
-  }
-  return { type: "FeatureCollection", features: out };
-}
-
-const ICON_COLOR = "#051F41";
-
-function IconDefault({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M12 21s7-4.5 7-10a7 7 0 1 0-14 0c0 5.5 7 10 7 10Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <Circle cx="12" cy="11" r="2.5" stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-function IconHealth({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4Z" fill={color} />
-    </Svg>
-  );
-}
-function IconCulture({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M4 10h16" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M6 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M10 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M14 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M18 10v9" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M3.5 10 12 5l8.5 5" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <Path d="M4 19h16" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-function IconEducation({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 6h7a3 3 0 0 1 3 3v12a3 3 0 0 0-3-3H5V6Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <Path d="M19 6h-7a3 3 0 0 0-3 3v12a3 3 0 0 1 3-3h7V6Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <Path d="M8 10h4" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-function IconTransport({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M6 4h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
-      <Path d="M7 8h10" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Circle cx="8" cy="18" r="1.7" stroke={color} strokeWidth={2} />
-      <Circle cx="16" cy="18" r="1.7" stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-function IconFood({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M7 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M5 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M9 3v8" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M7 11v10" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M15 3v8c0 1.5 1 2.5 2.5 2.5V21" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      <Path d="M15 8h5" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-function IconSport({ size = 18, color = ICON_COLOR }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect x="3" y="9" width="3" height="6" rx="1" stroke={color} strokeWidth={2} />
-      <Rect x="18" y="9" width="3" height="6" rx="1" stroke={color} strokeWidth={2} />
-      <Path d="M6 12h12" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Rect x="8" y="10" width="8" height="4" rx="1" stroke={color} strokeWidth={2} />
-    </Svg>
-  );
-}
-
-const POI_SVG = {
-  default: IconDefault,
-  health: IconHealth,
-  culture: IconCulture,
-  education: IconEducation,
-  transport: IconTransport,
-  food: IconFood,
-  sport: IconSport,
-};
-
-function PoiSvgIcon({ name, size = 18, color }) {
-  const Comp = POI_SVG[name] ?? IconDefault;
-  return <Comp size={size} color={color} />;
-}
-
-function IconCenter({ size = 22, color = "#051F41", accent = "#F09C1F" }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Circle cx="12" cy="12" r="8" stroke={color} strokeWidth={2} />
-      <Circle cx="12" cy="12" r="2.5" fill={accent} />
-      <Path d="M12 2v3" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M12 19v3" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M2 12h3" stroke={color} strokeWidth={2} strokeLinecap="round" />
-      <Path d="M19 12h3" stroke={color} strokeWidth={2} strokeLinecap="round" />
-    </Svg>
-  );
-}
-
-
 export default function MapScreen() {
   const tabBarH = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
-
   const { condition } = useContext(UserContext) ?? {};
+  const { t } = useTranslation();
 
   const [pois, setPois] = useState([]);
-  const [selectedPoi, setSelectedPoi] = useState(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-
-  const [routeActive, setRouteActive] = useState(false);
-  const [navSheetOpen, setNavSheetOpen] = useState(false);
-
-  
-  const [navMode, setNavMode] = useState("idle");
-  const navModeRef = useRef("idle");
-  useEffect(() => {
-    navModeRef.current = navMode;
-  }, [navMode]);
-
-  const [routeFullGeojson, setRouteFullGeojson] = useState(null);
-  const [routeRemainingGeojson, setRouteRemainingGeojson] = useState(null);
-  const [routeSegments, setRouteSegments] = useState([]);
-  const [etaMin, setEtaMin] = useState(0);
-
-  const [userCoord, setUserCoord] = useState(null);
-  const didCenterOnUser = useRef(false);
-
-  const streetsIndexRef = useRef(null);
-
-  
-  const routeNormRef = useRef(null);
-  const flatCoordsRef = useRef([]);
-  const indexMapRef = useRef([]); 
-  const nearestIdxRef = useRef(0);
-
-  const headingRef = useRef(0);
-  const lastCoordRef = useRef(null);
-  const lastCamTsRef = useRef(0);
-
- 
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [filterOpen, setFilterOpen] = useState(false);
 
+  const nav = useRouteNavigation({ cameraRef, tabBarH, insets, condition });
 
-  
-  const { t } = useTranslation();
+  const {
+    selectedPoi,
+    detailsOpen,
+    routeActive,
+    navSheetOpen,
+    routeOptions,
+    selectedPerfil,
+    following,
+    etaMin,
+    routeSegments,
+    userCoord,
+    routeShape,
+    userFeature,
+    selectedFeature,
+    setDetailsOpen,
+    pickDestination,
+    startNavigation,
+    previewPerfil,
+    confirmStartFollow,
+    openNavigationSheet,
+    closeNavigationSheet,
+    clearRoute,
+    centerBtnPress,
+  } = nav;
 
   const categories = useMemo(() => {
     const map = new Map();
     for (const p of pois ?? []) {
       if (!p?.categoryId) continue;
       const key = categoryKeyFromName(p.categoryName ?? String(p.categoryId));
-      const prev = map.get(p.categoryId) ?? { id: p.categoryId, name: p.categoryName ?? String(p.categoryId), key,count: 0 };
+      const prev =
+        map.get(p.categoryId) ?? { id: p.categoryId, name: p.categoryName ?? String(p.categoryId), key, count: 0 };
       prev.count += 1;
       map.set(p.categoryId, prev);
     }
@@ -319,7 +115,6 @@ export default function MapScreen() {
     setSelectedCatIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
-
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -335,24 +130,6 @@ export default function MapScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const raw = await getClassifiedStreets();
-        const idx = buildStreetIndex(raw);
-        if (alive) streetsIndexRef.current = idx;
-        console.log("[Mob2is] classified streets indexed:", idx.size);
-      } catch (e) {
-        console.warn("getClassifiedStreets error:", e);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // ====== map style (remove default POI icons) ======
   const [mapStyle, setMapStyle] = useState(MAP_STYLE_URL);
   useEffect(() => {
     let alive = true;
@@ -376,426 +153,6 @@ export default function MapScreen() {
     };
   }, []);
 
-  // ====== location watch (SÓ isto -> acaba o “duas bolas”) ======
-  useEffect(() => {
-    let watchId = null;
-    let alive = true;
-
-    const start = async () => {
-      try {
-        if (Platform.OS === "android") {
-          const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
-          const already = await PermissionsAndroid.check(fine);
-          const granted = already ? PermissionsAndroid.RESULTS.GRANTED : await PermissionsAndroid.request(fine);
-
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            console.warn("[Mob2is] Permissão de localização recusada.");
-            return;
-          }
-        }
-
-        watchId = Geolocation.watchPosition(
-          (pos) => {
-            if (!alive) return;
-            const { longitude, latitude } = pos.coords || {};
-            applyLocation(longitude, latitude);
-          },
-          (err) => console.warn("[Mob2is] watchPosition error:", err),
-          {
-            enableHighAccuracy: true,
-            distanceFilter: 1,
-            interval: 1000,
-            fastestInterval: 700,
-            forceRequestLocation: true,
-            showLocationDialog: true,
-          }
-        );
-      } catch (e) {
-        console.warn("[Mob2is] start watch error:", e);
-      }
-    };
-
-    start();
-
-    return () => {
-      alive = false;
-      if (watchId != null) Geolocation.clearWatch(watchId);
-      Geolocation.stopObserving?.();
-    };
-  }, []);
-
-  // ====== camera helpers ======
-  const setCam = (opts) => {
-    if (!cameraRef.current?.setCamera) return;
-    cameraRef.current.setCamera({
-      animationMode: "easeTo",
-      animationDuration: 250,
-      ...opts,
-    });
-  };
-
-  const resetCamera = (center = userCoord ?? VIANA_COORDS) => {
-    setCam({
-      centerCoordinate: center,
-      zoomLevel: 15,
-      pitch: 0,
-      heading: 0,
-      animationMode: "flyTo",
-      animationDuration: 650,
-    });
-  };
-
-  // ====== build route cache for “remaining” ======
-  const rebuildRouteCache = (routeFcNormalized) => {
-    routeNormRef.current = routeFcNormalized;
-    flatCoordsRef.current = [];
-    indexMapRef.current = [];
-    nearestIdxRef.current = 0;
-
-    const feats = routeFcNormalized?.features ?? [];
-    for (let fi = 0; fi < feats.length; fi++) {
-      const coords = feats[fi]?.geometry?.coordinates ?? [];
-      for (let ci = 0; ci < coords.length; ci++) {
-        flatCoordsRef.current.push(coords[ci]);
-        indexMapRef.current.push({ featureIndex: fi, coordIndex: ci });
-      }
-    }
-
-    // default remaining = full
-    setRouteRemainingGeojson(routeFcNormalized);
-  };
-
-  const buildRemainingFromIndex = (globalIdx) => {
-    const norm = routeNormRef.current;
-    if (!norm?.features?.length) return norm;
-
-    const mapItem = indexMapRef.current[globalIdx];
-    if (!mapItem) return norm;
-
-    const curF = mapItem.featureIndex;
-    const curC = mapItem.coordIndex;
-
-    const out = [];
-    for (let fi = curF; fi < norm.features.length; fi++) {
-      const f = norm.features[fi];
-      const coords = f?.geometry?.coordinates ?? [];
-      const sliced = fi === curF ? coords.slice(Math.max(0, curC)) : coords;
-
-      if (sliced.length >= 2) {
-        out.push({
-          type: "Feature",
-          properties: { ...(f.properties ?? {}) }, // mantém "color"
-          geometry: { type: "LineString", coordinates: sliced },
-        });
-      }
-    }
-
-    return { type: "FeatureCollection", features: out };
-  };
-
-  const updateNavProgress = (userC) => {
-    const flat = flatCoordsRef.current;
-    if (!flat?.length) return;
-
-    const lastIdx = nearestIdxRef.current ?? 0;
-
-    // procura numa janela à volta do último idx (mais rápido)
-    const W = 220;
-    let from = Math.max(0, lastIdx - W);
-    let to = Math.min(flat.length - 1, lastIdx + W);
-
-    let bestIdx = lastIdx;
-    let bestD = Infinity;
-
-    for (let i = from; i <= to; i++) {
-      const d = haversineMeters(userC, flat[i]);
-      if (d < bestD) {
-        bestD = d;
-        bestIdx = i;
-      }
-    }
-
-    // se estivermos muito longe da janela (teleporte), faz scan completo
-    if (bestD > 60) {
-      bestD = Infinity;
-      bestIdx = lastIdx;
-      for (let i = 0; i < flat.length; i += 2) {
-        const d = haversineMeters(userC, flat[i]);
-        if (d < bestD) {
-          bestD = d;
-          bestIdx = i;
-        }
-      }
-    }
-
-    // não andar para trás e evita updates “micro”
-    if (bestIdx <= lastIdx) return;
-    if (bestIdx - lastIdx < 3) return;
-
-    nearestIdxRef.current = bestIdx;
-    setRouteRemainingGeojson(buildRemainingFromIndex(bestIdx));
-  };
-
-  const setFollowCamera = (c, force = false) => {
-    const now = Date.now();
-    if (!force && now - lastCamTsRef.current < 280) return;
-    lastCamTsRef.current = now;
-
-    // heading suave a partir do movimento real
-    const prev = lastCoordRef.current;
-    if (prev) {
-      const d = haversineMeters(prev, c);
-      if (d < 0.8 && !force) return;
-
-      const b = bearingDeg(prev, c);
-      headingRef.current = lerpAngle(headingRef.current, b, 0.22);
-    }
-    lastCoordRef.current = c;
-
-    updateNavProgress(c);
-
-    const centerAhead = offsetForwardMeters(c, headingRef.current, 28);
-
-    setCam({
-      centerCoordinate: centerAhead,
-      zoomLevel: 18.1,
-      pitch: 68,
-      heading: headingRef.current,
-      animationMode: "easeTo",
-      animationDuration: 220,
-    });
-  };
-
-  const applyLocation = (lng, lat) => {
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
-    const c = [lng, lat];
-    setUserCoord(c);
-
-    if (!didCenterOnUser.current) {
-      didCenterOnUser.current = true;
-      setCam({
-        centerCoordinate: c,
-        zoomLevel: 15,
-        pitch: 0,
-        heading: 0,
-        animationMode: "flyTo",
-        animationDuration: 900,
-      });
-      return;
-    }
-
-    if (navModeRef.current === "follow") {
-      setFollowCamera(c);
-    }
-  };
-
-  // ====== map layers sources ======
-  const userFeature = useMemo(() => {
-    if (!userCoord) return { type: "FeatureCollection", features: [] };
-    return {
-      type: "FeatureCollection",
-      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: userCoord } }],
-    };
-  }, [userCoord]);
-
-  const selectedFeature = useMemo(() => {
-    if (!selectedPoi?.coords) return { type: "FeatureCollection", features: [] };
-    return {
-      type: "FeatureCollection",
-      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: selectedPoi.coords } }],
-    };
-  }, [selectedPoi]);
-
-  // ====== UI actions ======
-  const pickDestination = (poi) => {
-    setSelectedPoi(poi);
-    setDetailsOpen(true);
-
-    setRouteActive(false);
-    setNavSheetOpen(false);
-    setNavMode("idle");
-
-    setRouteFullGeojson(null);
-    setRouteRemainingGeojson(null);
-    routeNormRef.current = null;
-    flatCoordsRef.current = [];
-    indexMapRef.current = [];
-    nearestIdxRef.current = 0;
-
-    headingRef.current = 0;
-    lastCoordRef.current = null;
-
-    if (poi?.coords) {
-      setCam({
-        centerCoordinate: poi.coords,
-        zoomLevel: 15.2,
-        pitch: 0,
-        heading: 0,
-        animationMode: "flyTo",
-        animationDuration: 650,
-      });
-    }
-  };
-
-  const startFollow = () => {
-    setNavMode("follow");
-    setNavSheetOpen(false);
-
-    // garantir “remaining” começa no full
-    if (routeNormRef.current) {
-      setRouteRemainingGeojson(routeNormRef.current);
-      nearestIdxRef.current = 0;
-    }
-
-    if (userCoord) {
-      // força um update imediato para evitar “saltos”
-      lastCamTsRef.current = 0;
-      setFollowCamera(userCoord, true);
-    }
-  };
-
-  const openNavigationSheet = () => setNavSheetOpen(true);
-  const closeNavigationSheet = () => setNavSheetOpen(false);
-
-  const clearRoute = () => {
-    setNavMode("idle");
-    headingRef.current = 0;
-    lastCoordRef.current = null;
-    nearestIdxRef.current = 0;
-
-    resetCamera(userCoord ?? VIANA_COORDS);
-
-    setRouteActive(false);
-    setNavSheetOpen(false);
-
-    setRouteFullGeojson(null);
-    setRouteRemainingGeojson(null);
-    setRouteSegments([]);
-    setEtaMin(0);
-
-    setDetailsOpen(false);
-    setSelectedPoi(null);
-
-    routeNormRef.current = null;
-    flatCoordsRef.current = [];
-    indexMapRef.current = [];
-  };
-
-  const centerBtnPress = () => {
-    if (!userCoord) return;
-    if (navModeRef.current === "follow") {
-      lastCamTsRef.current = 0;
-      setFollowCamera(userCoord, true);
-    } else {
-      resetCamera(userCoord);
-    }
-  };
-
-  // ====== route build ======
-  const startNavigation = async (poi) => {
-    if (!poi?.coords) return;
-
-    const from = userCoord ?? VIANA_COORDS;
-    const [lng, lat] = from;
-    const [lngE, latE] = poi.coords;
-    const incapacidade = mapConditionToIncapacidade(condition);
-
-    const end =
-      poi.graphPointId != null
-        ? Number(poi.graphPointId)
-        : Number.isFinite(Number(poi.id))
-        ? Number(poi.id)
-        : null;
-
-    try {
-      const resp = await calculateRoute({
-        incapacidade,
-        end,
-        lati: lat,
-        longi: lng,
-        latE,
-        lngE,
-      });
-
-      const cores = Array.isArray(resp?.cores) ? resp.cores : [];
-      const pontos = Array.isArray(resp?.pontos) ? resp.pontos : null;
-      const streetsIndex = streetsIndexRef.current;
-
-      // 1) prefer ponto+streets
-      const builtFromPontos = pontos && streetsIndex ? buildRouteGeojsonFromPontos(pontos, cores, streetsIndex) : null;
-
-      if (builtFromPontos?.geojson?.features?.length) {
-        const norm = normalizeRouteGeojson(builtFromPontos.geojson);
-        setRouteFullGeojson(norm);
-        rebuildRouteCache(norm);
-
-        setRouteSegments(builtFromPontos.segments);
-        setEtaMin(estimateEtaMinutesFromLines(builtFromPontos.linesForEta, condition));
-
-        setRouteActive(true);
-        setNavMode("preview");
-        setNavSheetOpen(true);
-        setDetailsOpen(false);
-
-        // preview camera (um pouco mais perto)
-        const midLine = builtFromPontos.linesForEta[Math.floor(builtFromPontos.linesForEta.length / 2)];
-        const midCoord = midLine?.[Math.floor(midLine.length / 2)] ?? builtFromPontos.linesForEta[0]?.[0];
-        if (midCoord) {
-          setCam({
-            centerCoordinate: midCoord,
-            zoomLevel: 16.8,
-            pitch: 48,
-            heading: 0,
-            animationMode: "flyTo",
-            animationDuration: 700,
-          });
-        }
-
-        return;
-      }
-
-      // 2) fallback caminho
-      const lines = extractLinesFromCaminho(resp?.caminho);
-      const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
-      if (!safeLines.length) {
-        console.warn("[Mob2is] Rota sem coordenadas suficientes.", resp);
-        return;
-      }
-
-      const built = buildRouteGeojsonFromCaminho(safeLines, cores);
-      const norm = normalizeRouteGeojson(built.geojson);
-
-      setRouteFullGeojson(norm);
-      rebuildRouteCache(norm);
-
-      setRouteSegments(built.segments);
-      setEtaMin(estimateEtaMinutesFromLines(safeLines, condition));
-
-      setRouteActive(true);
-      setNavMode("preview");
-      setNavSheetOpen(true);
-      setDetailsOpen(false);
-
-      const midLine = safeLines[Math.floor(safeLines.length / 2)];
-      const midCoord = midLine?.[Math.floor(midLine.length / 2)] ?? safeLines[0]?.[0];
-      if (midCoord) {
-        setCam({
-          centerCoordinate: midCoord,
-          zoomLevel: 16.8,
-          pitch: 48,
-          heading: 0,
-          animationMode: "flyTo",
-          animationDuration: 700,
-        });
-      }
-    } catch (e) {
-      console.warn("calculateRoute error:", e);
-    }
-  };
-
-  // ✅ isto substitui o teu “navRemainingGeojson”
-  const routeShape = navMode === "follow" ? routeRemainingGeojson : routeFullGeojson;
-
   return (
     <View style={styles.page}>
       <MapLibreGL.MapView
@@ -816,7 +173,7 @@ export default function MapScreen() {
           }}
         />
 
-        {/* USER (um só ponto) */}
+        {/* USER */}
         <MapLibreGL.ShapeSource id="user" shape={userFeature}>
           <MapLibreGL.CircleLayer
             id="user-halo"
@@ -878,7 +235,7 @@ export default function MapScreen() {
           />
         </MapLibreGL.ShapeSource>
 
-        {/* rota (cores mantidas com ["get","color"]) */}
+        {/* rota */}
         {routeActive && routeShape?.features?.length ? (
           <MapLibreGL.ShapeSource id="route" shape={routeShape}>
             <MapLibreGL.LineLayer
@@ -905,20 +262,18 @@ export default function MapScreen() {
         ) : null}
       </MapLibreGL.MapView>
 
- 
+      {/* Centrar */}
       {userCoord ? (
         <Pressable
           onPress={centerBtnPress}
-          style={[
-            styles.centerBtn,
-            { top: insets.top + 82 }, 
-          ]}
+          style={[styles.centerBtn, { top: insets.top + 82 }]}
           accessibilityLabel={t("a11y.map_center_user")}
         >
           <IconCenter />
         </Pressable>
       ) : null}
 
+      {/* Botão filtros */}
       {!routeActive && !detailsOpen && categories.length > 1 ? (
         <>
           <Pressable
@@ -929,8 +284,8 @@ export default function MapScreen() {
             <Text style={styles.filterFabTitle}>{t("map.filters_title")}</Text>
             <Text style={styles.filterFabSub}>
               {selectedCatIds.length
-                  ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
-                  : t("map.summary_pois_visible", { count: filteredPois.length })}
+                ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
+                : t("map.summary_pois_visible", { count: filteredPois.length })}
             </Text>
 
             {selectedCatIds.length ? (
@@ -953,7 +308,6 @@ export default function MapScreen() {
                     {selectedCatIds.length
                       ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
                       : t("map.summary_points_visible", { count: filteredPois.length })}
-
                   </Text>
                 </View>
 
@@ -1004,7 +358,7 @@ export default function MapScreen() {
         </>
       ) : null}
 
-     
+      {/* Pill detalhes rota */}
       {routeActive && !navSheetOpen ? (
         <Pressable
           style={[styles.routePill, { bottom: tabBarH + 18 }]}
@@ -1034,9 +388,12 @@ export default function MapScreen() {
         poi={selectedPoi}
         etaMin={etaMin}
         segments={routeSegments}
-        following={navMode === "follow"}
+        following={following}
+        profiles={routeOptions}
+        selectedPerfil={selectedPerfil}
+        onSelectPerfil={previewPerfil}
+        onStartFollow={confirmStartFollow}
         onClose={closeNavigationSheet}
-        onStartFollow={startFollow}
         onClear={clearRoute}
       />
     </View>
@@ -1201,7 +558,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  catCountPillActive: { backgroundColor: "rgba(240,156,31,0.22)", borderWidth: 1, borderColor: "rgba(240,156,31,0.55)" },
+  catCountPillActive: {
+    backgroundColor: "rgba(240,156,31,0.22)",
+    borderWidth: 1,
+    borderColor: "rgba(240,156,31,0.55)",
+  },
   catCountText: { fontWeight: "900", color: "rgba(5,31,65,0.78)" },
   catCountTextActive: { color: "#051F41" },
 

@@ -3,9 +3,6 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import Svg, { Path, Circle, Line } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 
-
-
-
 function DotsLine({ color }) {
   const dots = useMemo(() => Array.from({ length: 7 }), []);
   return (
@@ -14,14 +11,6 @@ function DotsLine({ color }) {
         <View key={i} style={[styles.dot, { backgroundColor: color }]} />
       ))}
     </View>
-  );
-}
-
-function IconChevronDown({ size = 18, color = "#fff" }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M6 9l6 6 6-6" stroke={color} strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
   );
 }
 
@@ -44,10 +33,7 @@ function IconPinPlus({ size = 18, color = "#051F41", accent = "#F09C1F" }) {
 function IconPlay({ size = 18, color = "#051F41" }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M9 7.5v9l8-4.5-8-4.5Z"
-        fill={color}
-      />
+      <Path d="M9 7.5v9l8-4.5-8-4.5Z" fill={color} />
     </Svg>
   );
 }
@@ -60,6 +46,12 @@ export default function NavigationSheet({
   etaMin = 0,
   segments = [],
   following = false,
+
+  // ✅ NOVO: perfis/rotas
+  profiles = [], // pode ser ["rapida","equilibrada","acessivel"] OU [{perfil:"..."}]
+  selectedPerfil = "equilibrada",
+  onSelectPerfil,
+
   onClose,
   onClear,
   onStartFollow,
@@ -67,9 +59,9 @@ export default function NavigationSheet({
   const hiddenY = 900;
   const y = useRef(new Animated.Value(hiddenY)).current;
   const { t } = useTranslation();
+
   useEffect(() => {
     const target = !active || !open ? hiddenY : 0;
-
     Animated.spring(y, {
       toValue: target,
       damping: 22,
@@ -83,63 +75,106 @@ export default function NavigationSheet({
     return { alta: "#39A25D", media: "#F0B429", baixa: "#FF4D6D" };
   }, []);
 
+  // ✅ Normaliza perfis disponíveis
+  const availableProfiles = useMemo(() => {
+    const arr = Array.isArray(profiles) ? profiles : [];
+    const list = arr
+      .map((p) => (typeof p === "string" ? p : p?.perfil))
+      .filter(Boolean);
+    return new Set(list);
+  }, [profiles]);
+
+  const orderedProfiles = useMemo(() => ["rapida", "equilibrada", "acessivel"], []);
+
+  const labelForPerfil = (perfil) => {
+    if (perfil === "rapida") return t("navigation.profile_fast", { defaultValue: "Rápida" });
+    if (perfil === "equilibrada") return t("navigation.profile_balanced", { defaultValue: "Equilibrada" });
+    if (perfil === "acessivel") return t("navigation.profile_accessible", { defaultValue: "Acessível" });
+    return String(perfil);
+  };
+
   if (!active || !poi) return null;
 
   return (
     <Animated.View style={[styles.wrap, { bottom: bottomOffset, transform: [{ translateY: y }] }]}>
-      <View style={styles.handle} />
+      {/* ✅ sem botão "Ocultar": tocar no handle fecha */}
+      <Pressable onPress={onClose} style={styles.handleHit} accessibilityLabel="Fechar">
+        <View style={styles.handle} />
+      </Pressable>
 
-      <Text style={styles.destTitle}>{t("navigation.destination")}</Text>
+      <Text style={styles.destTitle}>{t("navigation.destination", { defaultValue: "Destino" })}</Text>
       <Text style={styles.destName} numberOfLines={2}>
         {poi.title}
       </Text>
 
       <View style={styles.metaBlock}>
-        <Text style={styles.eta}>{etaMin ? t("navigation.eta", { min: etaMin }) : t("navigation.eta_unknown")}</Text>
+        <Text style={styles.eta}>
+          {etaMin ? t("navigation.eta", { min: etaMin, defaultValue: `Tempo estimado: ${etaMin} min` }) : t("navigation.eta_unknown", { defaultValue: "Tempo estimado: —" })}
+        </Text>
 
-        {following ? (
-          <Text style={styles.followingHint}>{t("navigation.following_hint")}</Text>
-        ) : null}
+        {/* ✅ 3 botões de rota */}
+        <View style={styles.profileRow}>
+          {orderedProfiles.map((perfil) => {
+            const hasApiProfiles = availableProfiles.size > 0;
+            const disabled = following || (hasApiProfiles && !availableProfiles.has(perfil));
+            const isActive = perfil === (selectedPerfil || "equilibrada");
 
-        <View style={styles.actions}>
-          <Pressable style={styles.actionPillDark} onPress={onClose} accessibilityLabel="Ocultar detalhes">
-            <IconChevronDown />
-            <Text style={styles.actionPillDarkText}>{t("navigation.hide")}</Text>
-          </Pressable>
+            return (
+              <Pressable
+                key={perfil}
+                disabled={disabled}
+                onPress={() => onSelectPerfil?.(perfil)}
+                style={[
+                  styles.profilePill,
+                  isActive && styles.profilePillActive,
+                  disabled && styles.profilePillDisabled,
+                ]}
+              >
+                <Text style={[styles.profileText, isActive && styles.profileTextActive]}>
+                  {labelForPerfil(perfil)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
 
-          {!following ? (
-            <Pressable style={styles.actionPillOrange} onPress={onStartFollow} accessibilityLabel="Iniciar rota">
-              <IconPlay />
-              <Text style={styles.actionPillOrangeText}>{t("navigation.start_route")}</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.actionChip}>
-              <View style={styles.actionChipDot} />
-              <Text style={styles.actionChipText}>{t("navigation.navigating")}</Text>
-            </View>
-          )}
-
+        {/* Nova rota (mantém-se) */}
+        <View style={styles.actionsRow}>
           <Pressable style={styles.actionPillLight} onPress={onClear} accessibilityLabel="Nova rota">
             <IconPinPlus />
-            <Text style={styles.actionPillLightText}>{t("navigation.new_route")}</Text>
+            <Text style={styles.actionPillLightText}>{t("navigation.new_route", { defaultValue: "Nova rota" })}</Text>
           </Pressable>
         </View>
       </View>
 
+      {/* Legenda */}
       <View style={styles.legendBox}>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.alta} />
-          <Text style={styles.legendText}>{t("navigation.legend_high")}</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_high", { defaultValue: "Alta acessibilidade" })}</Text>
         </View>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.media} />
-          <Text style={styles.legendText}>{t("navigation.legend_medium")}</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_medium", { defaultValue: "Média acessibilidade" })}</Text>
         </View>
         <View style={styles.legendRow}>
           <DotsLine color={legendColors.baixa} />
-          <Text style={styles.legendText}>{t("navigation.legend_low")}</Text>
+          <Text style={styles.legendText}>{t("navigation.legend_low", { defaultValue: "Baixa acessibilidade" })}</Text>
         </View>
       </View>
+
+      {/* ✅ Iniciar rota em baixo da legenda */}
+      {!following ? (
+        <Pressable style={styles.startBtn} onPress={onStartFollow} accessibilityLabel="Iniciar rota">
+          <IconPlay />
+          <Text style={styles.startBtnText}>{t("navigation.start_route", { defaultValue: "Iniciar rota" })}</Text>
+        </Pressable>
+      ) : (
+        <View style={styles.followChip}>
+          <View style={styles.followDot} />
+          <Text style={styles.followChipText}>{t("navigation.navigating", { defaultValue: "A navegar…" })}</Text>
+        </View>
+      )}
     </Animated.View>
   );
 }
@@ -158,63 +193,50 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
+  handleHit: { alignSelf: "center", paddingVertical: 6, paddingHorizontal: 30 },
   handle: {
     width: 54,
     height: 6,
     borderRadius: 3,
     backgroundColor: "#C9D1DA",
     alignSelf: "center",
-    marginBottom: 10,
   },
-  destTitle: {
-    textAlign: "center",
-    fontSize: 14,
-    fontWeight: "900",
-    color: "#6B7A88",
-  },
-  destName: {
-    textAlign: "center",
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#051F41",
-    marginTop: 6,
-  },
+
+  destTitle: { textAlign: "center", fontSize: 14, fontWeight: "900", color: "#6B7A88" },
+  destName: { textAlign: "center", fontSize: 18, fontWeight: "900", color: "#051F41", marginTop: 6 },
 
   metaBlock: { marginTop: 16 },
   eta: { fontWeight: "900", color: "#6B7A88" },
-  followingHint: { marginTop: 6, fontWeight: "900", color: "#1579B3", fontSize: 12 },
 
-  actions: {
+  profileRow: {
+    marginTop: 12,
     flexDirection: "row",
-    alignItems: "center",
     gap: 10,
-    marginTop: 14,
+    justifyContent: "center",
     flexWrap: "wrap",
   },
-
-  actionPillDark: {
-    height: 40,
+  profilePill: {
+    height: 38,
     paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: "#051F41",
-    flexDirection: "row",
+    borderRadius: 19,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(21,121,179,0.25)",
     alignItems: "center",
-    gap: 8,
-    elevation: 10,
+    justifyContent: "center",
+    minWidth: 110,
+    elevation: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
-  actionPillDarkText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
+  profilePillActive: { backgroundColor: "#051F41", borderColor: "#051F41" },
+  profilePillDisabled: { opacity: 0.45 },
+  profileText: { fontWeight: "900", fontSize: 13, color: "#051F41" },
+  profileTextActive: { color: "#FFFFFF" },
 
-  actionPillOrange: {
-    height: 40,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: "#F09C1F",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    elevation: 10,
-  },
-  actionPillOrangeText: { color: "#051F41", fontWeight: "900", fontSize: 13 },
+  actionsRow: { marginTop: 14, alignItems: "flex-start" },
 
   actionPillLight: {
     height: 40,
@@ -227,22 +249,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     elevation: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   actionPillLightText: { color: "#051F41", fontWeight: "900", fontSize: 13 },
-
-  actionChip: {
-    height: 40,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: "rgba(57,162,93,0.14)",
-    borderWidth: 1,
-    borderColor: "rgba(57,162,93,0.35)",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  actionChipDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#39A25D" },
-  actionChipText: { fontWeight: "900", color: "#051F41", fontSize: 13 },
 
   legendBox: {
     marginTop: 12,
@@ -252,13 +264,40 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(5,31,65,0.06)",
   },
-  legendRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 6,
-    paddingLeft: 10,
-  },
+  legendRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 10 },
   dotsLine: { flexDirection: "row", alignItems: "center", gap: 5, width: 72 },
   dot: { width: 9, height: 9, borderRadius: 4 },
   legendText: { fontWeight: "900", color: "#051F41", marginLeft: 35 },
+
+  startBtn: {
+    marginTop: 12,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#F09C1F",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  startBtnText: { color: "#051F41", fontWeight: "900", fontSize: 14 },
+
+  followChip: {
+    marginTop: 12,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "rgba(57,162,93,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(57,162,93,0.35)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  followDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#39A25D" },
+  followChipText: { fontWeight: "900", fontSize: 14, color: "#39A25D" },
 });
