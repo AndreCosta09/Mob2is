@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Animated,
   Image,
   Modal,
   Pressable,
@@ -11,7 +10,9 @@ import {
   View,
 } from "react-native";
 
-const clamp = (n, a, b) => Math.max(a, Math.min(n, b));
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
 export default function PoiDetailsSheet({
   visible,
@@ -19,286 +20,356 @@ export default function PoiDetailsSheet({
   onClose,
   onStartNavigation,
 }) {
-  const { width, height } = useWindowDimensions();
-  const sheetH = Math.round(height * 0.72);
+  const { height: screenHeight } = useWindowDimensions();
 
-  const y = useRef(new Animated.Value(sheetH + 40)).current;
-  const overlay = useRef(new Animated.Value(0)).current;
+  const expandedHeight = Math.min(Math.max(520, Math.round(screenHeight * 0.74)), 700);
+  const collapsedHeight = Math.min(Math.max(360, Math.round(screenHeight * 0.42)), 430);
 
-  const images = useMemo(() => {
-    // Se a API/JSON já trouxer imagens, usa-as:
-    if (poi?.images?.length) return poi.images;
-    if (poi?.image) return [poi.image];
+  const [sheetHeight, setSheetHeight] = useState(0);
+  const [expanded, setExpanded] = useState(false);
 
-    // Placeholder (funciona com internet)
-    const id = poi?.id ?? 1;
-    return [
-      `https://picsum.photos/seed/mob2is-${id}-a/900/520`,
-      `https://picsum.photos/seed/mob2is-${id}-b/900/520`,
-    ];
-  }, [poi]);
+  const dragStartYRef = useRef(0);
+  const dragStartHeightRef = useRef(collapsedHeight);
 
   useEffect(() => {
-    if (!visible) {
-      Animated.parallel([
-        Animated.timing(overlay, { toValue: 0, duration: 160, useNativeDriver: true }),
-        Animated.timing(y, { toValue: sheetH + 40, duration: 200, useNativeDriver: true }),
-      ]).start();
+    if (visible) {
+      setExpanded(false);
+      setSheetHeight(collapsedHeight);
+    } else {
+      setExpanded(false);
+      setSheetHeight(0);
+    }
+  }, [visible, collapsedHeight]);
+
+  const heroImage = useMemo(() => {
+    if (poi?.images?.length) return poi.images[0];
+    if (poi?.image) return poi.image;
+    const id = poi?.id ?? 1;
+    return `https://picsum.photos/seed/mob2is-${id}-cover/900/520`;
+  }, [poi]);
+
+  const closeSheet = () => {
+    setExpanded(false);
+    setSheetHeight(0);
+    onClose?.();
+  };
+
+  const onDragGrant = (e) => {
+    dragStartYRef.current = e.nativeEvent.pageY;
+    dragStartHeightRef.current = sheetHeight || collapsedHeight;
+  };
+
+  const onDragMove = (e) => {
+    const currentY = e.nativeEvent.pageY;
+    const dy = currentY - dragStartYRef.current;
+
+    const nextHeight = clamp(
+      dragStartHeightRef.current - dy,
+      0,
+      expandedHeight
+    );
+
+    setSheetHeight(nextHeight);
+  };
+
+  const onDragRelease = (e) => {
+    const currentY = e.nativeEvent.pageY;
+    const dy = currentY - dragStartYRef.current;
+
+    const finalHeight = clamp(
+      dragStartHeightRef.current - dy,
+      0,
+      expandedHeight
+    );
+
+    const closeThreshold = collapsedHeight * 0.7;
+    const expandThreshold = (collapsedHeight + expandedHeight) / 2;
+
+    if (finalHeight <= closeThreshold) {
+      closeSheet();
       return;
     }
 
-    Animated.parallel([
-      Animated.timing(overlay, { toValue: 1, duration: 180, useNativeDriver: true }),
-      Animated.spring(y, {
-        toValue: 0,
-        damping: 18,
-        stiffness: 160,
-        mass: 1,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [visible, sheetH, overlay, y]);
+    if (finalHeight >= expandThreshold) {
+      setExpanded(true);
+      setSheetHeight(expandedHeight);
+      return;
+    }
 
-  if (!poi) return null;
+    setExpanded(false);
+    setSheetHeight(collapsedHeight);
+  };
+
+  if (!visible || !poi) return null;
 
   const title = poi.title ?? "Ponto de Interesse";
   const subtitle = poi.subtitle ?? "VIANA DO CASTELO, PORTUGAL";
+  const eta = poi.etaText ?? "Tempo estimado: 6 min";
+  const distance = poi.distanceText ?? "2,4 km";
+  const shortDesc =
+    poi.shortDescription ??
+    poi.description ??
+    "Seleciona este destino para veres as opções de rota disponíveis.";
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-   
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: overlay }]} />
-      </Pressable>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={closeSheet}
+      statusBarTranslucent
+    >
+      <View style={styles.root}>
+        <Pressable style={styles.backdrop} onPress={closeSheet} />
 
-   
-      <Animated.View
-        style={[
-          styles.sheet,
-          {
-            height: sheetH,
-            transform: [{ translateY: y }],
-          },
-        ]}
-      >
-        <View style={styles.handle} />
+        <View style={[styles.sheet, { height: sheetHeight }]}>
+          <View
+            style={styles.topDragZone}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={onDragGrant}
+            onResponderMove={onDragMove}
+            onResponderRelease={onDragRelease}
+            onResponderTerminate={onDragRelease}
+          >
+            <View style={styles.handle} />
 
-    
-        <View style={styles.header}>
-          <View style={styles.pin} />
-          <View style={{ flex: 1 }}>
-            <Text numberOfLines={1} style={styles.title}>
+            <View style={styles.headerRow}>
+              <View style={styles.destRow}>
+                <View style={styles.greenDot} />
+                <Text style={styles.destLabel}>Destino</Text>
+              </View>
+
+              <Pressable
+                onPress={closeSheet}
+                hitSlop={12}
+                style={styles.closeBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Fechar"
+              >
+                <Text style={styles.closeText}>×</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.title} numberOfLines={2}>
               {title}
             </Text>
-            <Text numberOfLines={1} style={styles.subtitle}>
+
+            <Text style={styles.subtitle} numberOfLines={1}>
               {subtitle}
             </Text>
+
+            <View style={styles.heroWrap}>
+              <Image source={{ uri: heroImage }} style={styles.heroImg} />
+            </View>
+          </View>
+
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLeft}>{eta}</Text>
+            <Text style={styles.metaRight}>{distance}</Text>
+          </View>
+
+          {expanded ? (
+            <ScrollView
+              style={styles.body}
+              contentContainerStyle={styles.bodyContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={styles.description}>{shortDesc}</Text>
+            </ScrollView>
+          ) : (
+            <View style={styles.bodyCollapsed}>
+              <Text style={styles.description} numberOfLines={2}>
+                {shortDesc}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.footer}>
+            <Pressable
+              style={styles.ctaBtn}
+              onPress={() => onStartNavigation?.(poi)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Selecionar rota"
+            >
+              <Text style={styles.ctaText}>Selecionar rota</Text>
+            </Pressable>
           </View>
         </View>
-
- 
-        <ScrollView
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          style={{ marginTop: 10 }}
-        >
-          {images.map((uri, idx) => (
-            <View key={String(idx)} style={{ width: width - 32 }}>
-              <Image source={{ uri }} style={styles.heroImg} />
-            </View>
-          ))}
-        </ScrollView>
-
- 
-        <ScrollView style={{ marginTop: 10 }} showsVerticalScrollIndicator={false}>
- 
-          <SectionLabel text="TRANSPORTES" />
-          <View style={styles.transportRow}>
-            <IconPill text="🚌" />
-            <IconPill text="🚗" />
-            <IconPill text="🚶" />
-            <View style={{ flex: 1 }} />
-            <View style={styles.dropdown}>
-              <Text style={styles.dropdownText}>Partida às 15h15</Text>
-              <Text style={styles.dropdownCaret}>▾</Text>
-            </View>
-          </View>
-
-          <View style={styles.table}>
-            {["Partida às 15h15  →  Chegada às 16h15",
-              "Partida às 15h30  →  Chegada às 16h30",
-              "Partida às 16h00  →  Chegada às 17h00"].map((t, i) => (
-              <View key={i} style={[styles.tableRow, i === 0 && { marginTop: 0 }]}>
-                <Text style={styles.tableText}>{t}</Text>
-              </View>
-            ))}
-          </View>
-
-        
-          <SectionLabel text="COMÉRCIO" />
-          <View style={styles.commerceRow}>
-            <Chip text="🍽️" />
-            <Chip text="☕" />
-            <Chip text="🛍️" />
-            <Chip text="🏧" />
-          </View>
-
-          <View style={{ height: 24 }} />
-        </ScrollView>
-
-        
-        <Pressable style={styles.navBtn} onPress={() => onStartNavigation?.(poi)}>
-          <Text style={styles.navBtnText}>➤</Text>
-        </Pressable>
-      </Animated.View>
+      </View>
     </Modal>
   );
 }
 
-function SectionLabel({ text }) {
-  return (
-    <View style={styles.sectionLabel}>
-      <Text style={styles.sectionLabelText}>{text}</Text>
-    </View>
-  );
-}
-
-function IconPill({ text }) {
-  return (
-    <View style={styles.iconPill}>
-      <Text style={styles.iconPillText}>{text}</Text>
-    </View>
-  );
-}
-
-function Chip({ text }) {
-  return (
-    <View style={styles.chip}>
-      <Text style={{ fontSize: 16 }}>{text}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.00)",
+    backgroundColor: "transparent",
   },
+
   sheet: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 94, 
     backgroundColor: "#F6F7F9",
-    borderRadius: 22,
-    padding: 12,
-    elevation: 40,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 16,
+    overflow: "hidden",
   },
+
+  topDragZone: {
+    paddingBottom: 6,
+  },
+
   handle: {
-    width: 54,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#C9D1DA",
     alignSelf: "center",
-    marginBottom: 10,
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(5,31,65,0.18)",
+    marginBottom: 12,
   },
-  header: {
+
+  headerRow: {
     flexDirection: "row",
-    gap: 10,
     alignItems: "center",
-    paddingHorizontal: 6,
+    justifyContent: "space-between",
   },
-  pin: {
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: "#35B46F",
+
+  destRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
-  title: { fontSize: 22, fontWeight: "900", color: "#0B2D4D" },
-  subtitle: { fontSize: 12, fontWeight: "900", color: "#0B2D4D", opacity: 0.75 },
+
+  greenDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#39A25D",
+    marginRight: 6,
+  },
+
+  destLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(5,31,65,0.42)",
+  },
+
+  closeBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  closeText: {
+    fontSize: 24,
+    lineHeight: 24,
+    color: "rgba(5,31,65,0.38)",
+    fontWeight: "400",
+  },
+
+  title: {
+    marginTop: 2,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: "900",
+    color: "#051F41",
+  },
+
+  subtitle: {
+    marginTop: 2,
+    marginBottom: 10,
+    fontSize: 11,
+    fontWeight: "800",
+    color: "rgba(5,31,65,0.42)",
+  },
+
+  heroWrap: {
+    borderRadius: 16,
+    overflow: "hidden",
+  },
 
   heroImg: {
-    height: 200,
-    borderRadius: 18,
     width: "100%",
-    backgroundColor: "#E9EDF2",
+    height: 170,
+    borderRadius: 16,
+    backgroundColor: "#E7ECF2",
   },
 
-  sectionLabel: {
-    alignSelf: "flex-start",
-    backgroundColor: "#F3B11C",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  sectionLabelText: { fontSize: 11, fontWeight: "900", color: "#2A1A00" },
-
-  transportRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  iconPill: {
-    width: 44,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 8,
-  },
-  iconPillText: { fontSize: 16 },
-
-  dropdown: {
-    height: 34,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    elevation: 8,
-  },
-  dropdownText: { fontWeight: "900", color: "#6B7A88", fontSize: 12 },
-  dropdownCaret: { fontWeight: "900", color: "#6B7A88" },
-
-  table: {
+  metaRow: {
     marginTop: 10,
-    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  metaLeft: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(5,31,65,0.42)",
+  },
+
+  metaRight: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(5,31,65,0.42)",
+  },
+
+  body: {
+    flex: 1,
+    marginTop: 8,
+  },
+
+  bodyContent: {
+    paddingBottom: 8,
+  },
+
+  bodyCollapsed: {
+    marginTop: 8,
+  },
+
+  description: {
+    fontSize: 14,
+    lineHeight: 22,
+    color: "rgba(5,31,65,0.86)",
+  },
+
+  footer: {
+    paddingTop: 12,
+  },
+
+  ctaBtn: {
+    height: 46,
     borderRadius: 14,
-    padding: 10,
-    elevation: 6,
-  },
-  tableRow: {
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginTop: 6,
-    backgroundColor: "#F6F7F9",
-    paddingHorizontal: 10,
-  },
-  tableText: { fontWeight: "800", color: "#6B7A88", fontSize: 12 },
-
-  commerceRow: { flexDirection: "row", gap: 10, marginTop: 6 },
-  chip: {
-    width: 44,
-    height: 40,
-    borderRadius: 12,
     backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(5,31,65,0.08)",
     alignItems: "center",
     justifyContent: "center",
-    elevation: 8,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
   },
 
-  navBtn: {
-    position: "absolute",
-    right: 14,
-    bottom: 14,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#0B2D4D",
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 30,
+  ctaText: {
+    color: "#F09C1F",
+    fontSize: 16,
+    fontWeight: "900",
   },
-  navBtnText: { color: "#fff", fontWeight: "900", fontSize: 18 },
 });

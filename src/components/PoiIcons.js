@@ -102,4 +102,21 @@ function IconCenter({ size = 22, color = "#051F41", accent = "#F09C1F" }) {
 }
 
 
-export { PoiSvgIcon, IconCenter };
+function IconFilters({ size = 22, color = "#051F41", accent = "#F09C1F" }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Line x1="4" y1="7" x2="20" y2="7" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <Line x1="4" y1="12" x2="20" y2="12" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+      <Line x1="4" y1="17" x2="20" y2="17" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+
+      <Circle cx="9" cy="7" r="2.2" fill="#FFFFFF" stroke={color} strokeWidth={2} />
+      <Circle cx="15" cy="12" r="2.2" fill="#FFFFFF" stroke={accent} strokeWidth={2} />
+      <Circle cx="11" cy="17" r="2.2" fill="#FFFFFF" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+
+
+
+export { PoiSvgIcon, IconCenter,IconFilters };

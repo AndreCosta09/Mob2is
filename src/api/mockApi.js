@@ -1,29 +1,31 @@
-
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const VIANA_COORDS = [-8.8273, 41.6946];
 
 const API_BASE_URL = "https://mob2is.pt/viana";
 
-
 export const CATEGORIES = [];
 export const POIS = [];
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; 
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_KEYS = {
   pois: "mob2is_cache_pois_v2",
   taxis: "mob2is_cache_taxis_v2",
   streets: "mob2is_cache_classified_streets_v1",
 };
 
+const ROUTE_V2_POST_TIMEOUT_MS = 20000;
+const ROUTE_V2_POLL_TIMEOUT_MS = 120000;
+
 async function readCache(key) {
   try {
     const raw = await AsyncStorage.getItem(key);
-    
     if (!raw) return null;
+
     const parsed = JSON.parse(raw);
     if (!parsed?.ts || !parsed?.data) return null;
     if (Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+
     return parsed.data;
   } catch {
     return null;
@@ -45,6 +47,7 @@ function normalizePhotoUrl(url) {
   if (!url) return null;
   const s = String(url).trim();
   if (!s) return null;
+
   try {
     return encodeURI(s);
   } catch {
@@ -59,6 +62,7 @@ function slugify(input) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+
   return s
     .replace(/&/g, " e ")
     .replace(/[^a-z0-9]+/g, "_")
@@ -67,10 +71,36 @@ function slugify(input) {
 
 function pseudoRating(id) {
   const n = Number(String(id).replace(/\D/g, "")) || 1;
-  return Number((4 + (n % 9) / 10).toFixed(1)); 
+  return Number((4 + (n % 9) / 10).toFixed(1));
 }
 
-async function httpGetJson(path, { timeoutMs = 12000 } = {}) {
+function cleanPayload(obj) {
+  const payload = { ...(obj ?? {}) };
+
+  Object.keys(payload).forEach((k) => {
+    if (
+      payload[k] === null ||
+      payload[k] === undefined ||
+      (typeof payload[k] === "number" && Number.isNaN(payload[k]))
+    ) {
+      delete payload[k];
+    }
+  });
+
+  return payload;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRouteV2PollDelayMs(attempt) {
+  if (attempt <= 3) return 2000;
+  if (attempt <= 8) return 4000;
+  return 8000;
+}
+
+async function httpGetJson(path, { timeoutMs = 25000 } = {}) {
   const url = `${API_BASE_URL}${path}`;
 
   const timeoutPromise = new Promise((_, reject) =>
@@ -91,7 +121,7 @@ async function httpGetJson(path, { timeoutMs = 12000 } = {}) {
   return Promise.race([fetchPromise, timeoutPromise]);
 }
 
-async function httpPostJson(path, body, { timeoutMs = 20000 } = {}) {
+async function httpPostJson(path, body, { timeoutMs = 25000 } = {}) {
   const url = `${API_BASE_URL}${path}`;
 
   const timeoutPromise = new Promise((_, reject) =>
@@ -136,56 +166,15 @@ function mapPoiFromApi(item) {
     title,
     categoryId,
     categoryName,
-
     coords,
     graphPointId: a.Ponto ?? null,
     description: a.DESCRICAO ?? "Sem descrição disponível.",
     phone: normalizePhone(a.TELEFONE),
-
     image,
     rating: pseudoRating(objectId),
     visits: 0,
   };
 }
-
-export async function getClassifiedStreets({ forceRefresh = false } = {}) {
-  if (!forceRefresh) {
-    const cached = await readCache(CACHE_KEYS.streets);
-    if (cached) return cached;
-  }
-
-  const raw = await httpGetJson("/getClassifiedStreets");
-  const streets = Array.isArray(raw) ? raw : [];
-  await writeCache(CACHE_KEYS.streets, streets);
-  return streets;
-}
-
-
-export async function calculateRoute({ incapacidade, end, lati, longi, latE, lngE } = {}) {
-  const payload = { incapacidade, end, lati, longi, latE, lngE };
-  Object.keys(payload).forEach((k) => {
-    if (payload[k] === null || payload[k] === undefined) delete payload[k];
-  });
-  return httpPostJson("/calculateRoute", payload, { timeoutMs: 30000 });
-}
-
-export async function calculateRouteMultiObjective({
-  incapacidade,
-  end,
-  lati,
-  longi,
-  latE,
-  lngE,
-  perfil = null,
-} = {}) {
-  const payload = { incapacidade, end, lati, longi, latE, lngE, perfil };
-  Object.keys(payload).forEach((k) => {
-    if (payload[k] === null || payload[k] === undefined) delete payload[k];
-  });
-  return httpPostJson("/calculateRouteMultiObjective", payload, { timeoutMs: 30000 });
-}
-
-
 
 function mapTaxiFromApi(item) {
   const a = item?.attributes ?? {};
@@ -204,6 +193,227 @@ function mapTaxiFromApi(item) {
   };
 }
 
+export async function getClassifiedStreets({ forceRefresh = false } = {}) {
+  if (!forceRefresh) {
+    const cached = await readCache(CACHE_KEYS.streets);
+    if (cached) return cached;
+  }
+
+  const raw = await httpGetJson("/getClassifiedStreets");
+  const streets = Array.isArray(raw) ? raw : [];
+  await writeCache(CACHE_KEYS.streets, streets);
+  return streets;
+}
+
+export async function calculateRoute({ incapacidade, end, lati, longi, latE, lngE } = {}) {
+  const payload = cleanPayload({ incapacidade, end, lati, longi, latE, lngE });
+  return httpPostJson("/calculateRoute", payload, { timeoutMs: 30000 });
+}
+
+/*
+ * LEGADO — endpoint antigo síncrono
+ *
+ * export async function calculateRouteMultiObjective({
+ *   incapacidade,
+ *   end,
+ *   lati,
+ *   longi,
+ *   latE,
+ *   lngE,
+ *   perfil = null,
+ * } = {}) {
+ *   const payload = cleanPayload({ incapacidade, end, lati, longi, latE, lngE, perfil });
+ *   return httpPostJson("/calculateRouteMultiObjective", payload, { timeoutMs: 30000 });
+ * }
+ */
+
+function normalizeScaledCoordinate(value, kind) {
+  let n = Number(value);
+  if (!Number.isFinite(n)) return null;
+
+  const limit = kind === "lat" ? 90 : 180;
+
+  while (Math.abs(n) > limit && Math.abs(n) >= 1000) {
+    n /= 10;
+  }
+
+  if (kind === "lat" && Math.abs(n) > 90) return null;
+  if (kind === "lng" && Math.abs(n) > 180) return null;
+
+  return n;
+}
+
+function normalizePointObjectToLngLat(point) {
+  if (!point || typeof point !== "object") return null;
+
+  const lat = normalizeScaledCoordinate(
+    point.latitude ?? point.lat ?? point.y,
+    "lat"
+  );
+  const lng = normalizeScaledCoordinate(
+    point.longitude ?? point.lng ?? point.x,
+    "lng"
+  );
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return [lng, lat];
+}
+
+function normalizeCaminhoSegment(segment) {
+  if (!Array.isArray(segment)) return [];
+
+  return segment
+    .map((point) => normalizePointObjectToLngLat(point))
+    .filter(Boolean);
+}
+
+function normalizeV2Caminho(caminho) {
+  if (!Array.isArray(caminho)) return [];
+
+  return caminho
+    .map(normalizeCaminhoSegment)
+    .filter((segment) => Array.isArray(segment) && segment.length >= 2);
+}
+
+function normalizeSingleRouteFromV2(route) {
+  if (!route || typeof route !== "object") return route;
+
+  const rawPontos = Array.isArray(route.pontos) ? route.pontos : [];
+  const rawCaminho = normalizeV2Caminho(route.caminho);
+
+  return {
+    ...route,
+    pontos: rawPontos,
+    caminho: rawCaminho,
+    cores: Array.isArray(route.niveis_acessibilidade)
+      ? route.niveis_acessibilidade
+      : Array.isArray(route.cores)
+      ? route.cores
+      : [],
+    caminhoNos: rawPontos,
+    pontosCoords: rawCaminho,
+  };
+}
+
+function normalizeMultiObjectiveResultFromV2(result) {
+  if (!result || typeof result !== "object") return result;
+
+  if (Array.isArray(result.rotas)) {
+    return {
+      ...result,
+      rotas: result.rotas.map(normalizeSingleRouteFromV2),
+    };
+  }
+
+  return normalizeSingleRouteFromV2(result);
+}
+
+async function pollCalculateRouteMultiObjectiveV2(
+  taskId,
+  { timeoutMs = ROUTE_V2_POLL_TIMEOUT_MS } = {}
+) {
+  const startedAt = Date.now();
+  let attempt = 0;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    attempt += 1;
+
+    const poll = await httpGetJson(`/calculateRouteMultiObjectiveV2/${taskId}`, {
+      timeoutMs: 20000,
+    });
+
+    console.log("[Mob2is] V2 poll", {
+      attempt,
+      elapsedMs: Date.now() - startedAt,
+      status: poll?.status,
+      taskId,
+    });
+
+    if (poll?.status === "done") {
+      return normalizeMultiObjectiveResultFromV2(poll?.resultado);
+    }
+
+    if (poll?.status === "error") {
+      throw new Error(poll?.detalhe || "Falha no cálculo da rota.");
+    }
+
+    if (poll?.status === "pending" || poll?.status === "processing") {
+      await sleep(getRouteV2PollDelayMs(attempt));
+      continue;
+    }
+
+    if (poll?.resultado) {
+      return normalizeMultiObjectiveResultFromV2(poll.resultado);
+    }
+
+    await sleep(getRouteV2PollDelayMs(attempt));
+  }
+
+  throw new Error("Timeout à espera do resultado de /calculateRouteMultiObjectiveV2.");
+}
+
+export async function calculateRouteMultiObjective({
+  incapacidade,
+  end,
+  lati,
+  longi,
+  latE,
+  lngE,
+  perfil = null,
+} = {}) {
+  const rawPayload = {
+    incapacidade,
+    end,
+    lati,
+    longi,
+    latE,
+    lngE,
+    perfil,
+  };
+
+  const payload = cleanPayload(rawPayload);
+
+  console.log("[Mob2is] V2 raw payload object", rawPayload);
+  console.log("[Mob2is] V2 cleaned payload object", payload);
+  console.log("[Mob2is] V2 cleaned payload JSON", JSON.stringify(payload, null, 2));
+
+  let launch;
+  try {
+    launch = await httpPostJson("/calculateRouteMultiObjectiveV2", payload, {
+      timeoutMs: ROUTE_V2_POST_TIMEOUT_MS,
+    });
+  } catch (e) {
+    if (isV2BadGatewayError(e)) {
+      console.warn("[Mob2is] V2 devolveu 502. A usar fallback para /calculateRouteMultiObjective.");
+      return calculateRouteMultiObjectiveLegacy(payload);
+    }
+    throw e;
+  }
+
+  console.log("[Mob2is] V2 POST response", launch);
+
+  if (launch?.status === "done") {
+    return normalizeMultiObjectiveResultFromV2(launch?.resultado);
+  }
+
+  if (launch?.status === "processing" && launch?.task_id) {
+    return pollCalculateRouteMultiObjectiveV2(launch.task_id);
+  }
+
+  if (launch?.status === "error") {
+    throw new Error(launch?.detalhe || "Falha ao iniciar o cálculo da rota.");
+  }
+
+  if (launch?.resultado) {
+    return normalizeMultiObjectiveResultFromV2(launch.resultado);
+  }
+
+  throw new Error("Resposta inesperada de /calculateRouteMultiObjectiveV2.");
+}
+
+export async function calculateRouteMultiObjectiveV2(args = {}) {
+  return calculateRouteMultiObjective(args);
+}
 
 export async function getPOIs({ forceRefresh = false } = {}) {
   if (!forceRefresh) {
@@ -235,26 +445,24 @@ export async function getTaxis({ forceRefresh = false } = {}) {
   return taxis;
 }
 
-
-
 export async function fetchCategories() {
   const pois = await getPOIs();
   const map = new Map();
+
   for (const p of pois) {
     if (!p?.categoryId) continue;
     if (!map.has(p.categoryId)) map.set(p.categoryId, p.categoryName);
   }
+
   return Array.from(map.entries())
     .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-
 export async function fetchPoisByCategory(categoryId) {
   const pois = await getPOIs();
   return pois.filter((p) => p.categoryId === categoryId);
 }
-
 
 export async function searchPois(q) {
   const pois = await getPOIs();

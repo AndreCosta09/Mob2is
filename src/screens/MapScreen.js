@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { UserContext } from "../context/UserContext";
 import { getPOIs, VIANA_COORDS } from "../api/mockApi";
 
-import { PoiSvgIcon, IconCenter } from "../components/PoiIcons";
+import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
 import useRouteNavigation from "../hooks/useRouteNavigation";
 import ExploreSearchPanel from "../components/ExploreSearchPanel";
 import PoiDetailsSheet from "../components/PoiDetailsSheet";
@@ -277,20 +277,15 @@ export default function MapScreen() {
       {!routeActive && !detailsOpen && categories.length > 1 ? (
         <>
           <Pressable
-            style={[styles.filterFab, { top: insets.top + 10 }]}
+             style={[styles.filterIconBtn, { top: insets.top + 10 }]}
             onPress={() => setFilterOpen(true)}
             accessibilityLabel={t("a11y.map_open_filters")}
           >
-            <Text style={styles.filterFabTitle}>{t("map.filters_title")}</Text>
-            <Text style={styles.filterFabSub}>
-              {selectedCatIds.length
-                ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
-                : t("map.summary_pois_visible", { count: filteredPois.length })}
-            </Text>
+            <IconFilters size={22} />
 
             {selectedCatIds.length ? (
-              <View style={styles.filterFabBadge}>
-                <Text style={styles.filterFabBadgeText}>{selectedCatIds.length}</Text>
+              <View style={styles.filterIconBadge}>
+                <Text style={styles.filterIconBadgeText}>{selectedCatIds.length}</Text>
               </View>
             ) : null}
           </Pressable>
@@ -378,7 +373,7 @@ export default function MapScreen() {
         visible={!routeActive && detailsOpen && !!selectedPoi}
         poi={selectedPoi}
         onClose={() => setDetailsOpen(false)}
-        onStartNavigation={startNavigation}
+        onStartNavigation={() => startNavigation(selectedPoi)}
       />
 
       <NavigationSheet
@@ -422,41 +417,45 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
 
-  filterFab: {
+
+  filterIconBadge: {
     position: "absolute",
-    left: 12,
-    right: 12,
-    height: 56,
-    borderRadius: 18,
-    backgroundColor: "rgba(246,247,249,0.96)",
-    borderWidth: 1,
-    borderColor: "rgba(11,45,77,0.08)",
-    paddingHorizontal: 14,
-    justifyContent: "center",
-    zIndex: 120,
-    elevation: 20,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  filterFabTitle: { fontWeight: "900", color: "#051F41", fontSize: 14 },
-  filterFabSub: { marginTop: 2, color: "rgba(5,31,65,0.75)", fontWeight: "800", fontSize: 12 },
-  filterFabBadge: {
-    position: "absolute",
-    right: 12,
-    top: 14,
-    height: 28,
-    minWidth: 28,
-    paddingHorizontal: 8,
-    borderRadius: 14,
+    right: -4,
+    top: -4,
+    height: 22,
+    minWidth: 22,
+    paddingHorizontal: 6,
+    borderRadius: 11,
     backgroundColor: "#F09C1F",
     alignItems: "center",
     justifyContent: "center",
-  },
-  filterFabBadgeText: { color: "#051F41", fontWeight: "900" },
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+   },
 
-  modalBackdrop: { flex: 1, backgroundColor: "rgba(5,31,65,0.28)" },
+
+filterIconBadgeText: { color: "#051F41", fontWeight: "900", fontSize: 11 },
+modalBackdrop: { flex: 1, backgroundColor: "rgba(5,31,65,0.28)" },
+
+
+filterIconBtn: {
+     position: "absolute",
+     left: 16,
+     width: 56,
+     height: 56,
+     borderRadius: 18,
+      backgroundColor: "rgba(246,247,249,0.96)",
+      borderWidth: 1,
+      borderColor: "rgba(11,45,77,0.08)",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 120,
+      elevation: 20,
+      shadowColor: "#000",
+      shadowOpacity: 0.12,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 8 },
+    },
 
   filterSheet: {
     position: "absolute",

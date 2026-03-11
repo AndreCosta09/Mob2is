@@ -11,11 +11,30 @@ import {
   estimateEtaMinutesFromLines,
 } from "../utils/map/route";
 
+const DEV_FORCE_LOCATION = true;
+const DEV_FIXED_COORD = [-8.846155, 41.693145]; 
+
 function mapConditionToIncapacidade(conditionKey) {
   if (conditionKey === "asd") return "Autismo";
   if (conditionKey === "visual") return "Invisual";
   return "MobReduzida";
 }
+
+function resolvePoiEnd(poi) {
+  const graphPointId = poi?.graphPointId;
+  if (graphPointId !== null && graphPointId !== undefined && String(graphPointId).trim() !== "") {
+    return graphPointId;
+  }
+
+  const fallbackId = poi?.id;
+  if (fallbackId !== null && fallbackId !== undefined && String(fallbackId).trim() !== "") {
+    return fallbackId;
+  }
+
+  return null;
+}
+
+
 
 function bearingDeg([lng1, lat1], [lng2, lat2]) {
   const toRad = (d) => (d * Math.PI) / 180;
@@ -119,11 +138,10 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     conditionRef.current = condition;
   }, [condition]);
 
-  // UI base
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // Rota / navegação
+  
   const [routeActive, setRouteActive] = useState(false);
   const [navSheetOpen, setNavSheetOpen] = useState(false);
 
@@ -370,50 +388,40 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   };
 
   const applyPathDataToMap = async (pd, { keepFollowing = false, fromLngLat = null } = {}) => {
-    if (!pd) return;
+  if (!pd) {
+    console.warn("[Mob2is] applyPathDataToMap sem path data");
+    return false;
+  }
 
-    const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
-    const pontos = Array.isArray(pd?.pontos) ? pd.pontos : null;
-    const streetsIndex = streetsIndexRef.current;
+  const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
+  const pontos = Array.isArray(pd?.pontos) ? pd.pontos : null;
+  const streetsIndex = streetsIndexRef.current;
 
-    const builtFromPontos = pontos && streetsIndex ? buildRouteGeojsonFromPontos(pontos, accessArr, streetsIndex) : null;
+  console.log("[Mob2is] applyPathDataToMap input", {
+    perfil: pd?.perfil,
+    pontosCount: Array.isArray(pontos) ? pontos.length : 0,
+    caminhoCount: Array.isArray(pd?.caminho) ? pd.caminho.length : 0,
+    accessCount: Array.isArray(accessArr) ? accessArr.length : 0,
+    hasStreetIndex: streetsIndex instanceof Map,
+  });
 
-    if (builtFromPontos?.geojson?.features?.length) {
-      const norm = normalizeRouteGeojson(builtFromPontos.geojson);
+  const builtFromPontos =
+    pontos && streetsIndex ? buildRouteGeojsonFromPontos(pontos, accessArr, streetsIndex) : null;
 
-      setRouteFullGeojson(norm);
-      rebuildRouteCache(norm);
+  if (builtFromPontos?.geojson?.features?.length) {
+    console.log("[Mob2is] rota construída via pontos", {
+      perfil: pd?.perfil,
+      featureCount: builtFromPontos.geojson.features.length,
+      segmentCount: builtFromPontos.segments.length,
+    });
 
-      setRouteSegments(builtFromPontos.segments);
-      setEtaMin(estimateEtaMinutesFromLines(builtFromPontos.linesForEta, conditionRef.current));
-
-      setRouteActive(true);
-
-      if (!keepFollowing) {
-        setNavMode("preview");
-        fitRouteToView(norm, { bottomPad: tabBarH + 420 });
-      }
-
-      if (keepFollowing && fromLngLat) {
-        updateNavProgress(fromLngLat);
-        setRouteRemainingGeojson(buildRemainingFromIndex(nearestIdxRef.current));
-      }
-      return;
-    }
-
-    const lines = extractLinesFromCaminho(pd?.caminho);
-    const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
-    if (!safeLines.length) return;
-
-    const built = buildRouteGeojsonFromCaminho(safeLines, accessArr);
-    const norm = normalizeRouteGeojson(built.geojson);
+    const norm = normalizeRouteGeojson(builtFromPontos.geojson);
 
     setRouteFullGeojson(norm);
     rebuildRouteCache(norm);
 
-    setRouteSegments(built.segments);
-    setEtaMin(estimateEtaMinutesFromLines(safeLines, conditionRef.current));
-
+    setRouteSegments(builtFromPontos.segments);
+    setEtaMin(estimateEtaMinutesFromLines(builtFromPontos.linesForEta, conditionRef.current));
     setRouteActive(true);
 
     if (!keepFollowing) {
@@ -425,7 +433,50 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
       updateNavProgress(fromLngLat);
       setRouteRemainingGeojson(buildRemainingFromIndex(nearestIdxRef.current));
     }
-  };
+
+    return true;
+  }
+
+  const lines = extractLinesFromCaminho(pd?.caminho);
+  const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
+
+  console.log("[Mob2is] fallback caminho", {
+    perfil: pd?.perfil,
+    rawLines: lines.length,
+    safeLines: safeLines.length,
+    totalPoints: safeLines.reduce((acc, l) => acc + l.length, 0),
+  });
+
+  if (!safeLines.length) {
+    console.warn("[Mob2is] sem geometria desenhável na rota", {
+      perfil: pd?.perfil,
+      pd,
+    });
+    return false;
+  }
+
+  const built = buildRouteGeojsonFromCaminho(safeLines, accessArr);
+  const norm = normalizeRouteGeojson(built.geojson);
+
+  setRouteFullGeojson(norm);
+  rebuildRouteCache(norm);
+
+  setRouteSegments(built.segments);
+  setEtaMin(estimateEtaMinutesFromLines(safeLines, conditionRef.current));
+  setRouteActive(true);
+
+  if (!keepFollowing) {
+    setNavMode("preview");
+    fitRouteToView(norm, { bottomPad: tabBarH + 420 });
+  }
+
+  if (keepFollowing && fromLngLat) {
+    updateNavProgress(fromLngLat);
+    setRouteRemainingGeojson(buildRemainingFromIndex(nearestIdxRef.current));
+  }
+
+  return true;
+};
 
   const recalcRouteFromHere = async (fromLngLat) => {
     if (!selectedPoi?.coords) return;
@@ -434,12 +485,10 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     const [lng, lat] = fromLngLat;
     const [lngE, latE] = selectedPoi.coords;
 
-    const end =
-      selectedPoi.graphPointId != null
-        ? Number(selectedPoi.graphPointId)
-        : Number.isFinite(Number(selectedPoi.id))
-        ? Number(selectedPoi.id)
-        : null;
+   const end = resolvePoiEnd(selectedPoi);
+    if (end == null) {
+      throw new Error("POI sem identificador de destino válido (Ponto/graphPointId).");
+    }
 
     const perfil = activePerfilRef.current ?? null;
 
@@ -503,13 +552,22 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     }
   };
 
-  // watchPosition
+
   useEffect(() => {
     let watchId = null;
     let alive = true;
 
     const start = async () => {
       try {
+
+        if (__DEV__ && DEV_FORCE_LOCATION) {
+          console.log("[Mob2is] A usar localização fixa de desenvolvimento", {
+            lng: DEV_FIXED_COORD[0],
+            lat: DEV_FIXED_COORD[1],
+          });
+          applyLocation(DEV_FIXED_COORD[0], DEV_FIXED_COORD[1]);
+          return;
+        }
         if (Platform.OS === "android") {
           const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
           const already = await PermissionsAndroid.check(fine);
@@ -645,57 +703,86 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     }
   };
 
-  const startNavigation = async (poi) => {
-    if (!poi?.coords) return;
+ const startNavigation = async (poiArg) => {
+  const poi = poiArg ?? selectedPoi;
+  if (!poi?.coords) return;
 
-    const from = userCoord ?? VIANA_COORDS;
-    const [lng, lat] = from;
-    const [lngE, latE] = poi.coords;
+  const from = userCoord ?? VIANA_COORDS;
+  const [lng, lat] = from;
+  const [lngE, latE] = poi.coords;
 
-    const incapacidade = mapConditionToIncapacidade(conditionRef.current);
+  const incapacidade = mapConditionToIncapacidade(conditionRef.current);
 
-    const end =
-      poi.graphPointId != null
-        ? Number(poi.graphPointId)
-        : Number.isFinite(Number(poi.id))
-        ? Number(poi.id)
-        : null;
+  const end = resolvePoiEnd(poi);
+  if (end == null) {
+    console.warn("[Mob2is] POI sem end válido");
+    return;
+  }
 
-    try {
-      const resp = await calculateRouteMultiObjective({
-        incapacidade,
-        end,
-        lati: lat,
-        longi: lng,
-        latE,
-        lngE,
-        perfil: null,
-      });
+  // Fecha já a sheet antiga para não ficar “presa” durante o polling
+  setSelectedPoi(poi);
+  setDetailsOpen(false);
+  setNavSheetOpen(false);
+  setFollowing(false);
+  setActivePerfil(null);
 
-      const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
-      if (!rotas.length) return;
+  console.log("[Mob2is] startNavigation", {
+    poi: poi?.title,
+    end,
+    incapacidade,
+  });
 
-      const pick =
-        rotas.find((r) => r?.perfil === "equilibrada") ||
-        rotas.find((r) => r?.perfil === "rapida") ||
-        rotas.find((r) => r?.perfil === "acessivel") ||
-        rotas[0];
+  try {
+    const resp = await calculateRouteMultiObjective({
+      incapacidade,
+      end,
+      lati: lat,
+      longi: lng,
+      latE,
+      lngE,
+      perfil: null,
+    });
 
-      setRouteOptions(rotas);
-      setSelectedPerfil(pick?.perfil ?? "equilibrada");
+    console.log("[Mob2is] resposta final multi-rota", resp);
 
-      setFollowing(false);
-      setActivePerfil(null);
-
-      await applyPathDataToMap(pick, { keepFollowing: false });
-
-      setNavSheetOpen(true);
-      setDetailsOpen(false);
-      setSelectedPoi(poi);
-    } catch (e) {
-      console.warn("calculateRouteMultiObjective error:", e);
+    const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
+    if (!rotas.length) {
+      console.warn("[Mob2is] resposta sem rotas");
+      setDetailsOpen(true);
+      return;
     }
-  };
+
+    const pick =
+      rotas.find((r) => r?.perfil === "equilibrada") ||
+      rotas.find((r) => r?.perfil === "rapida") ||
+      rotas.find((r) => r?.perfil === "acessivel") ||
+      rotas[0];
+
+    setRouteOptions(rotas);
+    setSelectedPerfil(pick?.perfil ?? "equilibrada");
+
+    const applied = await applyPathDataToMap(pick, { keepFollowing: false });
+
+    console.log("[Mob2is] applyPathDataToMap resultado", {
+      applied,
+      pickedPerfil: pick?.perfil,
+    });
+
+    if (!applied) {
+      setRouteActive(false);
+      setNavSheetOpen(false);
+      setDetailsOpen(true);
+      return;
+    }
+
+    setNavSheetOpen(true);
+  } catch (e) {
+    console.warn("calculateRouteMultiObjective error:", e);
+    setRouteActive(false);
+    setNavSheetOpen(false);
+    setDetailsOpen(true);
+  }
+};
 
   const previewPerfil = async (perfil) => {
     setSelectedPerfil(perfil);

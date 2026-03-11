@@ -163,7 +163,7 @@ export default function OnboardingScreen({ onDone }) {
         onPress={() => onDone?.(selected)}
         style={[styles.btn, !selected && styles.btnDisabled]}
       >
-        <Text style={styles.btnText}>Iniciar Rota</Text>
+        <Text style={styles.btnText}>Iniciar</Text>
       </Pressable>
     </View>
   );
