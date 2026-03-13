@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { UserContext } from "../context/UserContext";
 import { getPOIs, VIANA_COORDS } from "../api/mockApi";
+import { haversineMeters } from "../utils/map/geo";
 
 import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
 import useRouteNavigation from "../hooks/useRouteNavigation";
@@ -54,6 +55,88 @@ function categoryKeyFromName(nameOrId) {
   return "other";
 }
 
+function streetFieldFromCondition(conditionKey) {
+  if (conditionKey === "asd") return "Autismo";
+  if (conditionKey === "visual") return "Invisual";
+  return "MobReduzida";
+}
+
+// Assunção temporária para a escala do endpoint getClassifiedStreets:
+// 4 = alta, 3 = média, 2/1 = baixa, resto = sem dados.
+
+function streetColorFromConditionValue(value) {
+  const n = Number(value);
+  if (n >= 4) return "#39A25D";
+  if (n === 3) return "#F0B429";
+  if (n === 2 || n === 1) return "#FF4D6D";
+  return "#9AA3AD";
+}
+
+function minDistanceToCoordsMeters(userCoord, coords) {
+  if (!Array.isArray(coords) || !coords.length) return Infinity;
+
+  let best = Infinity;
+  for (const c of coords) {
+    if (!Array.isArray(c) || c.length < 2) continue;
+    const d = haversineMeters(userCoord, c);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function buildNearbyAccessibleStreetsGeoJSON(rawStreets, userCoord, conditionKey, radiusM = 450) {
+  if (!Array.isArray(rawStreets) || !userCoord) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  const field = streetFieldFromCondition(conditionKey);
+  const features = [];
+
+  for (const item of rawStreets) {
+    const attrs = item?.attributes ?? {};
+    const geometry = item?.geometry ?? {};
+    const value = attrs?.[field];
+    const color = streetColorFromConditionValue(value);
+
+    const paths = Array.isArray(geometry?.paths) ? geometry.paths : [];
+    for (const path of paths) {
+      if (!Array.isArray(path) || path.length < 2) continue;
+
+      const coords = path
+        .filter((p) => Array.isArray(p) && p.length >= 2)
+        .map(([lng, lat]) => [Number(lng), Number(lat)])
+        .filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat));
+
+      if (coords.length < 2) continue;
+
+      const minD = minDistanceToCoordsMeters(userCoord, coords);
+      if (minD > radiusM) continue;
+
+      features.push({
+        type: "Feature",
+        properties: {
+          color,
+          objectId: attrs.OBJECTID ?? null,
+          startPoint: attrs.StartPoint ?? null,
+          endPoint: attrs.EndPoint ?? null,
+          levelValue: Number.isFinite(Number(value)) ? Number(value) : null,
+        },
+        geometry: {
+          type: "LineString",
+          coordinates: coords,
+        },
+      });
+    }
+  }
+
+  return { type: "FeatureCollection", features };
+}
+
+
+
+
+
+
 export default function MapScreen() {
   const tabBarH = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
@@ -64,33 +147,44 @@ export default function MapScreen() {
   const [pois, setPois] = useState([]);
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [isSelectingOnMap, setIsSelectingOnMap] = useState(false);
+  const [showStreetAccessibility, setShowStreetAccessibility] = useState(false);
+
 
   const nav = useRouteNavigation({ cameraRef, tabBarH, insets, condition });
 
   const {
-    selectedPoi,
-    detailsOpen,
-    routeActive,
-    navSheetOpen,
-    routeOptions,
-    selectedPerfil,
-    following,
-    etaMin,
-    routeSegments,
-    userCoord,
-    routeShape,
-    userFeature,
-    selectedFeature,
-    setDetailsOpen,
-    pickDestination,
-    startNavigation,
-    previewPerfil,
-    confirmStartFollow,
-    openNavigationSheet,
-    closeNavigationSheet,
-    clearRoute,
-    centerBtnPress,
-  } = nav;
+      selectedPoi,
+      detailsOpen,
+      routeActive,
+      navSheetOpen,
+      routeOptions,
+      selectedPerfil,
+      following,
+      etaMin,
+      routeSegments,
+      userCoord,
+      routeShape,
+      userFeature,
+      selectedFeature,
+      classifiedStreetsRaw,
+      setDetailsOpen,
+      setSelectedPoi,
+      pickDestination,
+      startNavigation,
+      previewPerfil,
+      confirmStartFollow,
+      openNavigationSheet,
+      closeNavigationSheet,
+      clearRoute,
+      centerBtnPress,
+    } = nav;
+
+
+
+
+
+
 
   const categories = useMemo(() => {
     const map = new Map();
@@ -153,6 +247,90 @@ export default function MapScreen() {
     };
   }, []);
 
+function buildCustomDestinationPoi([lng, lat]) {
+  return {
+    id: `custom-${Date.now()}`,
+    title: "Destino selecionado no mapa",
+    categoryId: "custom",
+    categoryName: "Custom",
+    coords: [lng, lat],
+    graphPointId: null,
+    isCustomPoint: true,
+    description: `Ponto selecionado manualmente no mapa (${lat.toFixed(6)}, ${lng.toFixed(6)}).`,
+    routeSummary: "Destino personalizado",
+    trafficSummary: "Selecionado no mapa",
+    image: null,
+    rating: null,
+    phone: null,
+    visits: 0,
+  };
+}
+
+function extractMapPressLngLat(event) {
+  const geoCoords = event?.geometry?.coordinates;
+  if (Array.isArray(geoCoords) && geoCoords.length >= 2) {
+    const lng = Number(geoCoords[0]);
+    const lat = Number(geoCoords[1]);
+    if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+  }
+
+  const nativeCoords = event?.nativeEvent?.coordinates;
+  if (Array.isArray(nativeCoords) && nativeCoords.length >= 2) {
+    const lng = Number(nativeCoords[0]);
+    const lat = Number(nativeCoords[1]);
+    if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+  }
+
+  const lat = Number(
+    event?.nativeEvent?.coordinate?.latitude ?? event?.coordinate?.latitude
+  );
+  const lng = Number(
+    event?.nativeEvent?.coordinate?.longitude ?? event?.coordinate?.longitude
+  );
+
+  if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+  return null;
+}
+
+function setDestinationMode(useMapSelection) {
+  if (useMapSelection === isSelectingOnMap) return;
+
+  setIsSelectingOnMap(useMapSelection);
+  setFilterOpen(false);
+
+  if (selectedPoi?.isCustomPoint) {
+    setSelectedPoi(null);
+    setDetailsOpen(false);
+  }
+}
+
+function handleMapPress(event) {
+  if (!isSelectingOnMap || routeActive) return;
+
+  const coord = extractMapPressLngLat(event);
+  if (!coord) {
+    console.warn("[Mob2is] Não foi possível ler coordenadas do toque no mapa", event);
+    return;
+  }
+
+  const customPoi = buildCustomDestinationPoi(coord);
+  pickDestination(customPoi);
+}
+
+const nearbyStreetAccessibilityShape = useMemo(() => {
+  if (!showStreetAccessibility || !userCoord || routeActive) {
+    return { type: "FeatureCollection", features: [] };
+  }
+
+  return buildNearbyAccessibleStreetsGeoJSON(
+    classifiedStreetsRaw,
+    userCoord,
+    condition,
+    450
+  );
+}, [showStreetAccessibility, classifiedStreetsRaw, userCoord, condition, routeActive]);
+
+
   return (
     <View style={styles.page}>
       <MapLibreGL.MapView
@@ -162,6 +340,7 @@ export default function MapScreen() {
         attributionEnabled={false}
         preferredFramesPerSecond={30}
         surfaceView={true}
+        onPress={handleMapPress}
       >
         <MapLibreGL.Camera
           ref={cameraRef}
@@ -196,21 +375,22 @@ export default function MapScreen() {
           />
         </MapLibreGL.ShapeSource>
 
-        {/* POIs */}
-        {(filteredPois ?? [])
-          .filter((p) => Array.isArray(p?.coords))
-          .map((p) => (
-            <MapLibreGL.PointAnnotation
-              key={`poi-${p.id}`}
-              id={`poi-${p.id}`}
-              coordinate={p.coords}
-              onSelected={() => pickDestination(p)}
-            >
-              <View style={styles.poiMarker}>
-                <PoiSvgIcon name={iconNameForPoi(p)} size={18} />
-              </View>
-            </MapLibreGL.PointAnnotation>
-          ))}
+       {/* POIs */}
+        {!isSelectingOnMap &&
+          (filteredPois ?? [])
+            .filter((p) => Array.isArray(p?.coords))
+            .map((p) => (
+              <MapLibreGL.PointAnnotation
+                key={`poi-${p.id}`}
+                id={`poi-${p.id}`}
+                coordinate={p.coords}
+                onSelected={() => pickDestination(p)}
+              >
+                <View style={styles.poiMarker}>
+                  <PoiSvgIcon name={iconNameForPoi(p)} size={18} />
+                </View>
+              </MapLibreGL.PointAnnotation>
+            ))}
 
         {/* destino */}
         <MapLibreGL.ShapeSource id="selected-dest" shape={selectedFeature}>
@@ -234,6 +414,33 @@ export default function MapScreen() {
             }}
           />
         </MapLibreGL.ShapeSource>
+
+
+        {/* Navegação livre / acessibilidade das ruas */}
+          {showStreetAccessibility && !routeActive && nearbyStreetAccessibilityShape?.features?.length ? (
+            <MapLibreGL.ShapeSource id="free-nav-streets" shape={nearbyStreetAccessibilityShape}>
+              <MapLibreGL.LineLayer
+                id="free-nav-streets-shadow"
+                style={{
+                  lineWidth: 6,
+                  lineColor: "#000000",
+                  lineOpacity: 0.08,
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+              <MapLibreGL.LineLayer
+                id="free-nav-streets-main"
+                style={{
+                  lineWidth: 4,
+                  lineColor: ["get", "color"],
+                  lineOpacity: 0.92,
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+            </MapLibreGL.ShapeSource>
+          ) : null}
 
         {/* rota */}
         {routeActive && routeShape?.features?.length ? (
@@ -262,6 +469,32 @@ export default function MapScreen() {
         ) : null}
       </MapLibreGL.MapView>
 
+      {!routeActive && !detailsOpen ? (
+        <View style={[styles.mapModeWrap, { top: insets.top + 10 }]}>
+          <View style={styles.mapModePill}>
+            <Pressable
+              onPress={() => setDestinationMode(false)}
+              style={[styles.mapModeBtn, !isSelectingOnMap && styles.mapModeBtnActive]}
+              hitSlop={10}
+            >
+              <Text style={[styles.mapModeBtnText, !isSelectingOnMap && styles.mapModeBtnTextActive]}>
+                Destinos
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => setDestinationMode(true)}
+              style={[styles.mapModeBtn, isSelectingOnMap && styles.mapModeBtnActive]}
+              hitSlop={10}
+            >
+              <Text style={[styles.mapModeBtnText, isSelectingOnMap && styles.mapModeBtnTextActive]}>
+                Selecionar no mapa
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+
       {/* Centrar */}
       {userCoord ? (
         <Pressable
@@ -274,10 +507,10 @@ export default function MapScreen() {
       ) : null}
 
       {/* Botão filtros */}
-      {!routeActive && !detailsOpen && categories.length > 1 ? (
+      {!routeActive && !detailsOpen && !isSelectingOnMap && categories.length > 1 ? (
         <>
           <Pressable
-             style={[styles.filterIconBtn, { top: insets.top + 10 }]}
+             style={[styles.filterIconBtn, { top: insets.top + 82 }]}
             onPress={() => setFilterOpen(true)}
             accessibilityLabel={t("a11y.map_open_filters")}
           >
@@ -315,6 +548,43 @@ export default function MapScreen() {
                   <Text style={styles.btnPrimaryText}>{t("common.done")}</Text>
                 </Pressable>
               </View>
+               
+              <Pressable
+                    onPress={() => setShowStreetAccessibility((prev) => !prev)}
+                    style={[
+                      styles.freeNavCard,
+                      showStreetAccessibility && styles.freeNavCardActive,
+                    ]}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.freeNavTitle,
+                          showStreetAccessibility && styles.freeNavTitleActive,
+                        ]}
+                      >
+                        Mostrar acessibilidade das ruas
+                      </Text>
+
+                      <Text style={styles.freeNavSubtitle}>
+                        Rede pedestre perto da tua posição atual
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.freeNavSwitch,
+                        showStreetAccessibility && styles.freeNavSwitchActive,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.freeNavSwitchKnob,
+                          showStreetAccessibility && styles.freeNavSwitchKnobActive,
+                        ]}
+                      />
+                    </View>
+                  </Pressable> 
 
               <ScrollView contentContainerStyle={styles.filterGrid} showsVerticalScrollIndicator={false}>
                 {categories.map((c) => {
@@ -365,7 +635,7 @@ export default function MapScreen() {
         </Pressable>
       ) : null}
 
-      {!routeActive && !detailsOpen ? (
+      {!routeActive && !detailsOpen && !isSelectingOnMap ? (
         <ExploreSearchPanel bottomOffset={tabBarH + 10} onPickDestination={pickDestination} />
       ) : null}
 
@@ -379,7 +649,7 @@ export default function MapScreen() {
       <NavigationSheet
         active={routeActive && !!selectedPoi}
         open={navSheetOpen}
-        bottomOffset={tabBarH + 50}
+        bottomOffset={0}
         poi={selectedPoi}
         etaMin={etaMin}
         segments={routeSegments}
@@ -439,24 +709,23 @@ modalBackdrop: { flex: 1, backgroundColor: "rgba(5,31,65,0.28)" },
 
 
 filterIconBtn: {
-     position: "absolute",
-     left: 16,
-     width: 56,
-     height: 56,
-     borderRadius: 18,
-      backgroundColor: "rgba(246,247,249,0.96)",
-      borderWidth: 1,
-      borderColor: "rgba(11,45,77,0.08)",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 120,
-      elevation: 20,
-      shadowColor: "#000",
-      shadowOpacity: 0.12,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 8 },
-    },
-
+  position: "absolute",
+  left: 16,
+  width: 56,
+  height: 56,
+  borderRadius: 18,
+  backgroundColor: "rgba(246,247,249,0.96)",
+  borderWidth: 1,
+  borderColor: "rgba(11,45,77,0.08)",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 120,
+  elevation: 20,
+  shadowColor: "#000",
+  shadowOpacity: 0.12,
+  shadowRadius: 14,
+  shadowOffset: { width: 0, height: 8 },
+},
   filterSheet: {
     position: "absolute",
     left: 0,
@@ -602,4 +871,111 @@ filterIconBtn: {
   },
   routePillBadge: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#F09C1F", marginRight: 10 },
   routePillText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
+mapModeWrap: {
+  position: "absolute",
+  alignSelf: "center",
+  zIndex: 140,
+  elevation: 24,
+},
+
+mapModePill: {
+  flexDirection: "row",
+  backgroundColor: "rgba(246,247,249,0.97)",
+  borderRadius: 18,
+  padding: 4,
+  borderWidth: 1,
+  borderColor: "rgba(11,45,77,0.08)",
+  shadowColor: "#000",
+  shadowOpacity: 0.1,
+  shadowRadius: 10,
+  shadowOffset: { width: 0, height: 4 },
+},
+
+mapModeBtn: {
+  minWidth: 126,
+  height: 36,
+  borderRadius: 14,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 12,
+},
+
+mapModeBtnActive: {
+  backgroundColor: "#051F41",
+},
+
+mapModeBtnText: {
+  fontSize: 13,
+  fontWeight: "900",
+  color: "#6B7A88",
+},
+
+mapModeBtnTextActive: {
+  color: "#FFFFFF",
+},
+
+freeNavCard: {
+  marginBottom: 12,
+  minHeight: 68,
+  borderRadius: 16,
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: "rgba(11,45,77,0.08)",
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+},
+
+freeNavCardActive: {
+  backgroundColor: "rgba(57,162,93,0.10)",
+  borderColor: "rgba(57,162,93,0.45)",
+},
+
+freeNavTitle: {
+  fontSize: 14,
+  fontWeight: "900",
+  color: "#051F41",
+},
+
+freeNavTitleActive: {
+  color: "#051F41",
+},
+
+freeNavSubtitle: {
+  marginTop: 3,
+  fontSize: 12,
+  fontWeight: "700",
+  color: "rgba(5,31,65,0.56)",
+},
+
+freeNavSwitch: {
+  width: 48,
+  height: 28,
+  borderRadius: 14,
+  backgroundColor: "rgba(11,45,77,0.12)",
+  padding: 3,
+  justifyContent: "center",
+},
+
+freeNavSwitchActive: {
+  backgroundColor: "rgba(57,162,93,0.28)",
+},
+
+freeNavSwitchKnob: {
+  width: 22,
+  height: 22,
+  borderRadius: 11,
+  backgroundColor: "#FFFFFF",
+  alignSelf: "flex-start",
+},
+
+freeNavSwitchKnobActive: {
+  alignSelf: "flex-end",
+  backgroundColor: "#39A25D",
+},
+
+
+
 });

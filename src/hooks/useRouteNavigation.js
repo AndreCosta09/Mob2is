@@ -20,6 +20,37 @@ function mapConditionToIncapacidade(conditionKey) {
   return "MobReduzida";
 }
 
+function isCustomDestinationPoi(poi) {
+  return !!poi?.isCustomPoint || poi?.graphPointId == null;
+}
+
+function routeSignature(route) {
+  if (Array.isArray(route?.pontos) && route.pontos.length) {
+    return `p:${route.pontos.join(">")}`;
+  }
+
+  if (Array.isArray(route?.caminho) && route.caminho.length) {
+    return `c:${JSON.stringify(route.caminho)}`;
+  }
+
+  return `perfil:${route?.perfil ?? "unknown"}`;
+}
+
+function dedupeMultiRoutes(rotas = []) {
+  const out = [];
+  const seen = new Set();
+
+  for (const route of rotas) {
+    if (!route) continue;
+    const sig = routeSignature(route);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(route);
+  }
+
+  return out;
+}
+
 function resolvePoiEnd(poi) {
   const graphPointId = poi?.graphPointId;
   if (graphPointId !== null && graphPointId !== undefined && String(graphPointId).trim() !== "") {
@@ -33,8 +64,6 @@ function resolvePoiEnd(poi) {
 
   return null;
 }
-
-
 
 function bearingDeg([lng1, lat1], [lng2, lat2]) {
   const toRad = (d) => (d * Math.PI) / 180;
@@ -191,6 +220,10 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const routeInFlightRef = useRef(false);
   const lastRecalcAtRef = useRef(0);
   const offRouteCountRef = useRef(0);
+
+
+
+  const [classifiedStreetsRaw, setClassifiedStreetsRaw] = useState([]);
 
   const setCam = (opts) => {
     if (!cameraRef?.current?.setCamera) return;
@@ -485,8 +518,10 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     const [lng, lat] = fromLngLat;
     const [lngE, latE] = selectedPoi.coords;
 
-   const end = resolvePoiEnd(selectedPoi);
-    if (end == null) {
+   const customPoint = isCustomDestinationPoi(selectedPoi);
+   const end = customPoint ? null : resolvePoiEnd(selectedPoi);
+
+    if (!customPoint && end == null) {
       throw new Error("POI sem identificador de destino válido (Ponto/graphPointId).");
     }
 
@@ -612,23 +647,26 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
 
   useEffect(() => {
-    let alive = true;
+  let alive = true;
 
-    (async () => {
-      try {
-        const raw = await getClassifiedStreets();
-        const idx = buildStreetIndex(raw);
-        if (alive) streetsIndexRef.current = idx;
-      } catch (e) {
-        console.warn("getClassifiedStreets error:", e);
-      }
-    })();
+  (async () => {
+        try {
+          const raw = await getClassifiedStreets();
+          const idx = buildStreetIndex(raw);
 
-    return () => {
-      alive = false;
-    };
-  }, []);
+          if (alive) {
+            streetsIndexRef.current = idx;
+            setClassifiedStreetsRaw(Array.isArray(raw) ? raw : []);
+          }
+        } catch (e) {
+          console.warn("getClassifiedStreets error:", e);
+        }
+      })();
 
+      return () => {
+        alive = false;
+      };
+    }, []);
 
   const pickDestination = (poi) => {
     setSelectedPoi(poi);
@@ -713,13 +751,14 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
   const incapacidade = mapConditionToIncapacidade(conditionRef.current);
 
-  const end = resolvePoiEnd(poi);
-  if (end == null) {
+  const customPoint = isCustomDestinationPoi(poi);
+  const end = customPoint ? null : resolvePoiEnd(poi);
+
+  if (!customPoint && end == null) {
     console.warn("[Mob2is] POI sem end válido");
     return;
-  }
+}
 
-  // Fecha já a sheet antiga para não ficar “presa” durante o polling
   setSelectedPoi(poi);
   setDetailsOpen(false);
   setNavSheetOpen(false);
@@ -745,7 +784,9 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
     console.log("[Mob2is] resposta final multi-rota", resp);
 
-    const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
+   const rotasRaw = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
+   const rotas = dedupeMultiRoutes(rotasRaw);
+
     if (!rotas.length) {
       console.warn("[Mob2is] resposta sem rotas");
       setDetailsOpen(true);
@@ -831,7 +872,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const routeShape = navMode === "follow" ? routeRemainingGeojson : routeFullGeojson;
 
   return {
-    // state
+
     selectedPoi,
     detailsOpen,
     routeActive,
@@ -845,7 +886,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     routeShape,
     userFeature,
     selectedFeature,
-
+    classifiedStreetsRaw,
 
     setDetailsOpen,
     setSelectedPoi,

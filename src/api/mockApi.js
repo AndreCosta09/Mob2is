@@ -90,6 +90,37 @@ function cleanPayload(obj) {
   return payload;
 }
 
+function cleanRoutePayloadPreserveNulls(obj) {
+  const payload = { ...(obj ?? {}) };
+
+  Object.keys(payload).forEach((k) => {
+    const v = payload[k];
+    if (v === undefined || (typeof v === "number" && Number.isNaN(v))) {
+      delete payload[k];
+    }
+  });
+
+  return payload;
+}
+
+function isV2BadGatewayError(err) {
+  const msg = String(err?.message ?? "");
+  return msg.includes("HTTP 502 em /calculateRouteMultiObjectiveV2");
+}
+
+async function calculateRouteMultiObjectiveLegacy({
+  incapacidade,
+  end,
+  lati,
+  longi,
+  latE,
+  lngE,
+  perfil = null,
+} = {}) {
+  const payload = cleanPayload({ incapacidade, end, lati, longi, latE, lngE, perfil });
+  return httpPostJson("/calculateRouteMultiObjective", payload, { timeoutMs: 30000 });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -371,7 +402,7 @@ export async function calculateRouteMultiObjective({
     perfil,
   };
 
-  const payload = cleanPayload(rawPayload);
+  const payload = cleanRoutePayloadPreserveNulls(rawPayload);
 
   console.log("[Mob2is] V2 raw payload object", rawPayload);
   console.log("[Mob2is] V2 cleaned payload object", payload);
