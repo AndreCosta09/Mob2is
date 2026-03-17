@@ -101,9 +101,7 @@ export default function MoreScreen({ navigation }) {
           title={t("more.items.route.title")}
           subtitle={t("more.items.route.subtitle")}
           icon={ICONS.route}
-          onPress={() => {
-            console.log("Programar Percurso");
-          }}
+          onPress={() => navigation.navigate("RoutePlanner")}
         />
 
         <View style={styles.sep} />
@@ -124,7 +122,7 @@ export default function MoreScreen({ navigation }) {
           title={t("more.items.terms.title")}
           subtitle={t("more.items.terms.subtitle")}
           icon={ICONS.terms}
-          onPress={() => console.log("Termos e Condições")}
+          onPress={() => navigation.navigate("Terms")}
         />
       </View>
       <View style={{ height: 14 }} />

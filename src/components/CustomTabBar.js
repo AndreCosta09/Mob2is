@@ -8,32 +8,29 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import Svg, { Defs, Mask, Rect, Path } from "react-native-svg";
+import Svg, { Defs, Mask, Path, Rect } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import CategoriasIcon from "../assets/categorias.svg";
+import MaisIcon from "../assets/mais.svg";
+
+const EMPTY_ROUTES = [];
 
 const ICONS = {
   Explorar: require("../assets/navigate.png"),
-  Pesquisar: require("../assets/search.png"),
-  Mais: require("../assets/mais.png"),
 };
 
 const SIDE_PAD = 0;
 const BAR_HEIGHT = 66;
 const CORNER_R = 10;
-
 const NOTCH_W = 100;
 const NOTCH_DEPTH = 30;
-
 const BALL_SIZE = 58;
-const BALL_GAP = 5; 
+const BALL_GAP = 5;
 
 const ACTIVE_COLOR = "#F09C1F";
 const INACTIVE_TINT = "#F09C1F";
-
 const BAR_BG = "#FFFFFF";
 const BAR_STROKE = "rgba(102,112,128,0.25)";
-const NOTCH_STROKE = "rgba(11, 45, 77, 0.10)";
-
 
 const CUT_DEPTH = Math.min(NOTCH_DEPTH, BALL_SIZE / 2 - BALL_GAP + 10);
 
@@ -51,11 +48,10 @@ function buildDentPath(cx, barW, depth) {
 
   const x1 = cx - notchW / 2;
   const x2 = cx + notchW / 2;
-
-  const c1x = x1 + notchW * 0.20;
+  const c1x = x1 + notchW * 0.2;
   const c2x = cx - notchW * 0.25;
   const c3x = cx + notchW * 0.25;
-  const c4x = x2 - notchW * 0.20;
+  const c4x = x2 - notchW * 0.2;
 
   return [
     `M ${x1} ${topY}`,
@@ -66,50 +62,65 @@ function buildDentPath(cx, barW, depth) {
   ].join(" ");
 }
 
+function TabIcon({ routeName, color, size }) {
+  if (routeName === "Pesquisar") {
+    return <CategoriasIcon width={size} height={size} color={color} />;
+  }
+
+  if (routeName === "Mais") {
+    return <MaisIcon width={size} height={size} color={color} />;
+  }
+
+  return (
+    <Image
+      source={ICONS[routeName]}
+      style={[
+        styles.iconImg,
+        {
+          width: size,
+          height: size,
+          tintColor: color,
+        },
+      ]}
+    />
+  );
+}
+
 export default function CustomTabBar(props) {
   const { state, descriptors, navigation } = props || {};
-  if (!state?.routes?.length) return null;
-
+  const routes = state?.routes ?? EMPTY_ROUTES;
+  const activeIndex = state?.index ?? 0;
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
-  const routesLen = state.routes.length;
-
   const barW = Math.max(260, width - SIDE_PAD * 2);
-  const tabW = barW / routesLen;
+  const tabW = routes.length ? barW / routes.length : barW;
 
   const centers = useMemo(
-    () => state.routes.map((_, i) => tabW * (i + 0.5)),
-    [state.routes.length, tabW]
+    () => routes.map((_, index) => tabW * (index + 0.5)),
+    [routes, tabW]
   );
 
   const centerX = useRef(
-    new Animated.Value(centers[state.index] ?? centers[0])
+    new Animated.Value(centers[activeIndex] ?? centers[0] ?? 0)
   ).current;
   const bounceY = useRef(new Animated.Value(0)).current;
-
   const dentMaskRef = useRef(null);
-  const dentStrokeRef = useRef(null);
-
-  const initialCx = centers[state.index] ?? centers[0];
+  const initialCx = centers[activeIndex] ?? centers[0] ?? barW / 2;
   const initialCutD = buildDentPath(initialCx, barW, CUT_DEPTH);
-  const initialDeepD = buildDentPath(initialCx, barW, NOTCH_DEPTH);
 
   useEffect(() => {
     const id = centerX.addListener(({ value }) => {
-
-      const cutD = buildDentPath(value, barW, CUT_DEPTH);
-      dentMaskRef.current?.setNativeProps({ d: cutD });
-
-  
-      const deepD = buildDentPath(value, barW, NOTCH_DEPTH);
-      dentStrokeRef.current?.setNativeProps({ d: deepD });
+      dentMaskRef.current?.setNativeProps({
+        d: buildDentPath(value, barW, CUT_DEPTH),
+      });
     });
+
     return () => centerX.removeListener(id);
-  }, [centerX, barW]);
+  }, [barW, centerX]);
 
   useEffect(() => {
-    const to = centers[state.index] ?? centers[0];
+    const to = centers[activeIndex] ?? centers[0];
 
     Animated.parallel([
       Animated.spring(centerX, {
@@ -132,12 +143,13 @@ export default function CustomTabBar(props) {
         }),
       ]),
     ]).start();
-  }, [state.index, centers]);
+  }, [activeIndex, bounceY, centerX, centers]);
 
   const ballTranslateX = Animated.subtract(centerX, BALL_SIZE / 2);
   const ballTop = -BALL_SIZE / 2 - BALL_GAP;
+  const activeRouteName = routes[activeIndex]?.name;
 
-  const activeRouteName = state.routes[state.index]?.name;
+  if (!routes.length) return null;
 
   return (
     <View style={[styles.wrap, { paddingBottom: insets.bottom }]}>
@@ -161,12 +173,10 @@ export default function CustomTabBar(props) {
                 ry={CORNER_R}
                 fill="rgb(255, 255, 255)"
               />
-        
               <Path ref={dentMaskRef} d={initialCutD} fill="black" />
             </Mask>
           </Defs>
 
-        
           <Rect
             x="0"
             y="0"
@@ -178,9 +188,6 @@ export default function CustomTabBar(props) {
             stroke={BAR_STROKE}
             mask="url(#barMask)"
           />
-
-       
- 
         </Svg>
 
         <Animated.View
@@ -194,13 +201,13 @@ export default function CustomTabBar(props) {
           ]}
         >
           <View style={styles.ball}>
-            <Image source={ICONS[activeRouteName]} style={styles.ballImg} />
+            <TabIcon routeName={activeRouteName} color="#0B2D4D" size={25} />
           </View>
         </Animated.View>
 
         <View style={styles.row}>
-          {state.routes.map((route, index) => {
-            const isFocused = state.index === index;
+          {routes.map((route, index) => {
+            const isFocused = activeIndex === index;
             const label = descriptors[route.key]?.options?.tabBarLabel ?? route.name;
 
             const onPress = () => {
@@ -209,15 +216,17 @@ export default function CustomTabBar(props) {
                 target: route.key,
                 canPreventDefault: true,
               });
-              if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+
+              if (!isFocused && !event.defaultPrevented) {
+                navigation.navigate(route.name);
+              }
             };
 
             return (
               <Pressable key={route.key} onPress={onPress} style={styles.tab}>
-                <Image
-                  source={ICONS[route.name]}
-                  style={[styles.iconImg, isFocused && styles.iconHidden]}
-                />
+                <View style={isFocused && styles.iconHidden}>
+                  <TabIcon routeName={route.name} color={INACTIVE_TINT} size={30} />
+                </View>
                 <Text style={[styles.label, isFocused && styles.labelActive]}>{label}</Text>
               </Pressable>
             );
@@ -238,14 +247,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     overflow: "visible",
   },
-
   pillShadow: {
     overflow: "visible",
     backgroundColor: "transparent",
   },
-
-  svg: { backgroundColor: "transparent" },
-
+  svg: {
+    backgroundColor: "transparent",
+  },
   row: {
     position: "absolute",
     left: 0,
@@ -255,7 +263,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
   },
-
   tab: {
     flex: 1,
     height: BAR_HEIGHT,
@@ -263,25 +270,26 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingBottom: 10,
   },
-
   iconImg: {
-    width: 30,
-    height: 30,
     resizeMode: "contain",
     marginBottom: 6,
-    tintColor: INACTIVE_TINT,
   },
-  iconHidden: { opacity: 0 },
-
-  label: { fontSize: 12, color: "#9AA3AD" },
-  labelActive: { color: ACTIVE_COLOR, fontWeight: "900" },
-
+  iconHidden: {
+    opacity: 0,
+  },
+  label: {
+    fontSize: 12,
+    color: "#9AA3AD",
+  },
+  labelActive: {
+    color: ACTIVE_COLOR,
+    fontWeight: "900",
+  },
   ballWrap: {
     position: "absolute",
     width: BALL_SIZE,
     height: BALL_SIZE,
   },
-
   ball: {
     width: BALL_SIZE,
     height: BALL_SIZE,
@@ -294,12 +302,5 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 7 },
     elevation: 10,
-  },
-
-  ballImg: {
-    width: 25,
-    height: 25,
-    resizeMode: "contain",
-    tintColor: "#0B2D4D",
   },
 });

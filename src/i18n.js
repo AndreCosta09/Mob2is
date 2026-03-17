@@ -20,7 +20,7 @@ i18n.use(initReactI18next).init({
 
         tabs: {
           explore: "Explorar",
-          search: "Pesquisar",
+          search: "Categorias",
           more: "Mais",
         },
 
@@ -63,6 +63,7 @@ i18n.use(initReactI18next).init({
             language: "Idioma",
             general: "Geral",
             accessibility: "Acessibilidade",
+            legal: "Legal",
           },
           language: "Idioma da aplicação",
           language_sub: "Escolhe o idioma dos menus e textos",
@@ -74,6 +75,21 @@ i18n.use(initReactI18next).init({
           reduce_motion_sub: "Animações mais suaves e simples",
           high_contrast: "Alto contraste",
           high_contrast_sub: "Melhor legibilidade",
+          terms_title: "Termos e Condições",
+          terms_intro:
+            "Ao utilizar a Mob2is, aceita os Termos e Condições aplicáveis à utilização da aplicação e dos seus serviços.",
+          terms_links_intro:
+            "Consulte também os documentos legais associados:",
+          privacy_policy: "Política de Privacidade",
+          cookies_policy: "Política de Cookies",
+          link_error_title: "Não foi possível abrir o link",
+          link_error_message:
+            "Tente novamente dentro de instantes.",
+        },
+        terms: {
+          pdf_error_title: "Não foi possível abrir o PDF",
+          pdf_error_message:
+            "Verifique se o documento foi incluído corretamente na app e tente novamente.",
         },
 
         categories: {
@@ -165,7 +181,7 @@ i18n.use(initReactI18next).init({
 
         tabs: {
           explore: "Explore",
-          search: "Search",
+          search: "Categories",
           more: "More",
         },
 
@@ -208,6 +224,7 @@ i18n.use(initReactI18next).init({
             language: "Language",
             general: "General",
             accessibility: "Accessibility",
+            legal: "Legal",
           },
           language: "App language",
           language_sub: "Choose the language used in the app",
@@ -219,6 +236,21 @@ i18n.use(initReactI18next).init({
           reduce_motion_sub: "Simpler and smoother animations",
           high_contrast: "High contrast",
           high_contrast_sub: "Better readability",
+          terms_title: "Terms & Conditions",
+          terms_intro:
+            "By using Mob2is, you accept the Terms & Conditions that apply to the use of the app and its services.",
+          terms_links_intro:
+            "Please also review the related legal documents:",
+          privacy_policy: "Privacy Policy",
+          cookies_policy: "Cookie Policy",
+          link_error_title: "Could not open the link",
+          link_error_message:
+            "Please try again in a moment.",
+        },
+        terms: {
+          pdf_error_title: "Could not open the PDF",
+          pdf_error_message:
+            "Please verify that the document is bundled correctly in the app and try again.",
         },
 
         categories: {

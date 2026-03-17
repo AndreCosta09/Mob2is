@@ -1,5 +1,14 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { View, StyleSheet, Pressable, Text, ScrollView, Modal } from "react-native";
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  Text,
+  ScrollView,
+  Modal,
+  Animated,
+  Easing,
+} from "react-native";
 
 import MapLibreGL from "@maplibre/maplibre-react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -7,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 
 import { UserContext } from "../context/UserContext";
-import { getPOIs, VIANA_COORDS } from "../api/mockApi";
+import { getApiErrorMessage, getPOIs, VIANA_COORDS } from "../api/mockApi";
 import { haversineMeters } from "../utils/map/geo";
 
 import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
@@ -133,7 +142,74 @@ function buildNearbyAccessibleStreetsGeoJSON(rawStreets, userCoord, conditionKey
 }
 
 
+function RouteLoadingDots() {
+  const anims = useRef(
+    Array.from({ length: 5 }, () => new Animated.Value(0))
+  ).current;
 
+  useEffect(() => {
+    const loops = anims.map((anim, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 120),
+          Animated.timing(anim, {
+            toValue: 1,
+            duration: 420,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim, {
+            toValue: 0,
+            duration: 420,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.delay((anims.length - index - 1) * 70),
+        ])
+      )
+    );
+
+    loops.forEach((loop) => loop.start());
+
+    return () => {
+      loops.forEach((loop) => loop.stop());
+    };
+  }, [anims]);
+
+  return (
+    <View style={styles.routeLoadingWave}>
+      {anims.map((anim, index) => {
+        const translateY = anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -10],
+        });
+
+        const scale = anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.22],
+        });
+
+        const opacity = anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.45, 1],
+        });
+
+        return (
+          <Animated.View
+            key={`loading-dot-${index}`}
+            style={[
+              styles.routeLoadingWaveDot,
+              {
+                opacity,
+                transform: [{ translateY }, { scale }],
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+}
 
 
 
@@ -141,7 +217,7 @@ export default function MapScreen() {
   const tabBarH = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
-  const { condition } = useContext(UserContext) ?? {};
+  const { condition, routePreference } = useContext(UserContext) ?? {};
   const { t } = useTranslation();
 
   const [pois, setPois] = useState([]);
@@ -149,9 +225,16 @@ export default function MapScreen() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [isSelectingOnMap, setIsSelectingOnMap] = useState(false);
   const [showStreetAccessibility, setShowStreetAccessibility] = useState(false);
+  const [poisErrorMessage, setPoisErrorMessage] = useState("");
 
 
-  const nav = useRouteNavigation({ cameraRef, tabBarH, insets, condition });
+  const nav = useRouteNavigation({
+    cameraRef,
+    tabBarH,
+    insets,
+    condition,
+    routePreference,
+  });
 
   const {
       selectedPoi,
@@ -168,6 +251,9 @@ export default function MapScreen() {
       userFeature,
       selectedFeature,
       classifiedStreetsRaw,
+      isCalculatingRoute,
+      routeCalculationMessage,
+      apiErrorMessage,
       setDetailsOpen,
       setSelectedPoi,
       pickDestination,
@@ -214,15 +300,23 @@ export default function MapScreen() {
     (async () => {
       try {
         const list = await getPOIs();
-        if (alive) setPois(list);
+        if (alive) {
+          setPois(list);
+          setPoisErrorMessage("");
+        }
       } catch (e) {
         console.warn("getPOIs error:", e);
+        if (alive) {
+          setPoisErrorMessage(getApiErrorMessage(e, "Nao foi possivel carregar os pontos de interesse."));
+        }
       }
     })();
     return () => {
       alive = false;
     };
   }, []);
+
+  const mapErrorMessage = poisErrorMessage || apiErrorMessage;
 
   const [mapStyle, setMapStyle] = useState(MAP_STYLE_URL);
   useEffect(() => {
@@ -623,6 +717,12 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
         </>
       ) : null}
 
+      {mapErrorMessage ? (
+        <View style={[styles.errorBanner, { top: insets.top + 140 }]}>
+          <Text style={styles.errorBannerText}>{mapErrorMessage}</Text>
+        </View>
+      ) : null}
+
       {/* Pill detalhes rota */}
       {routeActive && !navSheetOpen ? (
         <Pressable
@@ -646,6 +746,23 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
         onStartNavigation={() => startNavigation(selectedPoi)}
       />
 
+      <Modal
+          visible={isCalculatingRoute}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+        >
+          <View style={styles.routeLoadingBackdrop}>
+            <View style={styles.routeLoadingCard}>
+              <RouteLoadingDots />
+              <Text style={styles.routeLoadingTitle}>A calcular a rota</Text>
+              <Text style={styles.routeLoadingText}>
+                {routeCalculationMessage || "A calcular a melhor rota para si"}
+              </Text>
+            </View>
+          </View>
+        </Modal>
+
       <NavigationSheet
         active={routeActive && !!selectedPoi}
         open={navSheetOpen}
@@ -666,6 +783,65 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
 }
 
 const styles = StyleSheet.create({
+
+  routeLoadingBackdrop: {
+  flex: 1,
+  backgroundColor: "rgba(5,31,65,0.24)",
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 28,
+},
+
+routeLoadingCard: {
+  minWidth: 240,
+  maxWidth: 320,
+  borderRadius: 22,
+  backgroundColor: "rgba(246,247,249,0.98)",
+  borderWidth: 1,
+  borderColor: "rgba(11,45,77,0.08)",
+  paddingVertical: 20,
+  paddingHorizontal: 18,
+  alignItems: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.14,
+  shadowRadius: 16,
+  shadowOffset: { width: 0, height: 8 },
+  elevation: 24,
+},
+
+routeLoadingWave: {
+  height: 28,
+  flexDirection: "row",
+  alignItems: "flex-end",
+  justifyContent: "center",
+  gap: 8,
+  marginBottom: 14,
+},
+
+routeLoadingWaveDot: {
+  width: 11,
+  height: 11,
+  borderRadius: 5.5,
+  backgroundColor: "#F09C1F",
+  shadowColor: "#F09C1F",
+  shadowOpacity: 0.28,
+  shadowRadius: 6,
+  shadowOffset: { width: 0, height: 2 },
+},
+
+routeLoadingTitle: {
+  fontSize: 16,
+  fontWeight: "900",
+  color: "#051F41",
+},
+
+routeLoadingText: {
+  marginTop: 6,
+  fontSize: 13,
+  fontWeight: "700",
+  color: "rgba(5,31,65,0.68)",
+  textAlign: "center",
+},
   page: { flex: 1 },
   map: { flex: 1 },
 
@@ -685,6 +861,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 8 },
+  },
+  errorBanner: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,244,232,0.98)",
+    borderWidth: 1,
+    borderColor: "rgba(241,143,1,0.32)",
+    elevation: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  errorBannerText: {
+    color: "#8A4B00",
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "center",
   },
 
 

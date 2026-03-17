@@ -16,6 +16,14 @@ const CACHE_KEYS = {
 
 const ROUTE_V2_POST_TIMEOUT_MS = 20000;
 const ROUTE_V2_POLL_TIMEOUT_MS = 120000;
+const API_USER_MESSAGES = {
+  "/getPOIs": "Nao foi possivel carregar os pontos de interesse.",
+  "/getTaxis": "Nao foi possivel carregar os taxis.",
+  "/getClassifiedStreets": "Nao foi possivel carregar a acessibilidade das ruas.",
+  "/calculateRoute": "Nao foi possivel calcular a rota.",
+  "/calculateRouteMultiObjective": "Nao foi possivel calcular a rota.",
+  "/calculateRouteMultiObjectiveV2": "Nao foi possivel calcular a rota.",
+};
 
 async function readCache(key) {
   try {
@@ -108,6 +116,34 @@ function isV2BadGatewayError(err) {
   return msg.includes("HTTP 502 em /calculateRouteMultiObjectiveV2");
 }
 
+function getApiDefaultUserMessage(path) {
+  if (!path) return "Ocorreu um erro ao comunicar com o servidor.";
+
+  if (API_USER_MESSAGES[path]) return API_USER_MESSAGES[path];
+  if (path.startsWith("/calculateRouteMultiObjectiveV2/")) {
+    return API_USER_MESSAGES["/calculateRouteMultiObjectiveV2"];
+  }
+
+  return "Ocorreu um erro ao comunicar com o servidor.";
+}
+
+function createApiError(path, cause, fallbackMessage) {
+  const error = new Error(String(cause?.message ?? fallbackMessage ?? "Erro de API."));
+  error.cause = cause;
+  error.apiPath = path;
+  error.userMessage = getApiDefaultUserMessage(path);
+  return error;
+}
+
+function normalizeApiError(path, error, fallbackMessage) {
+  if (error?.userMessage) return error;
+  return createApiError(path, error, fallbackMessage);
+}
+
+export function getApiErrorMessage(error, fallback = "Ocorreu um erro ao comunicar com o servidor.") {
+  return error?.userMessage || fallback;
+}
+
 async function calculateRouteMultiObjectiveLegacy({
   incapacidade,
   end,
@@ -149,7 +185,11 @@ async function httpGetJson(path, { timeoutMs = 25000 } = {}) {
     return res.json();
   });
 
-  return Promise.race([fetchPromise, timeoutPromise]);
+  try {
+    return await Promise.race([fetchPromise, timeoutPromise]);
+  } catch (error) {
+    throw normalizeApiError(path, error, `Falha a pedir ${path}`);
+  }
 }
 
 async function httpPostJson(path, body, { timeoutMs = 25000 } = {}) {
@@ -174,7 +214,11 @@ async function httpPostJson(path, body, { timeoutMs = 25000 } = {}) {
     return res.json();
   });
 
-  return Promise.race([fetchPromise, timeoutPromise]);
+  try {
+    return await Promise.race([fetchPromise, timeoutPromise]);
+  } catch (error) {
+    throw normalizeApiError(path, error, `Falha a pedir ${path}`);
+  }
 }
 
 function mapPoiFromApi(item) {
@@ -365,7 +409,11 @@ async function pollCalculateRouteMultiObjectiveV2(
     }
 
     if (poll?.status === "error") {
-      throw new Error(poll?.detalhe || "Falha no cálculo da rota.");
+      throw createApiError(
+        `/calculateRouteMultiObjectiveV2/${taskId}`,
+        null,
+        poll?.detalhe || "Falha no calculo da rota."
+      );
     }
 
     if (poll?.status === "pending" || poll?.status === "processing") {
@@ -380,7 +428,11 @@ async function pollCalculateRouteMultiObjectiveV2(
     await sleep(getRouteV2PollDelayMs(attempt));
   }
 
-  throw new Error("Timeout à espera do resultado de /calculateRouteMultiObjectiveV2.");
+  throw createApiError(
+    `/calculateRouteMultiObjectiveV2/${taskId}`,
+    null,
+    "Timeout a espera do resultado de /calculateRouteMultiObjectiveV2."
+  );
 }
 
 export async function calculateRouteMultiObjective({
@@ -432,14 +484,22 @@ export async function calculateRouteMultiObjective({
   }
 
   if (launch?.status === "error") {
-    throw new Error(launch?.detalhe || "Falha ao iniciar o cálculo da rota.");
+    throw createApiError(
+      "/calculateRouteMultiObjectiveV2",
+      null,
+      launch?.detalhe || "Falha ao iniciar o calculo da rota."
+    );
   }
 
   if (launch?.resultado) {
     return normalizeMultiObjectiveResultFromV2(launch.resultado);
   }
 
-  throw new Error("Resposta inesperada de /calculateRouteMultiObjectiveV2.");
+  throw createApiError(
+    "/calculateRouteMultiObjectiveV2",
+    null,
+    "Resposta inesperada de /calculateRouteMultiObjectiveV2."
+  );
 }
 
 export async function calculateRouteMultiObjectiveV2(args = {}) {

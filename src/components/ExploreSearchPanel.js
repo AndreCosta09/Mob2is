@@ -1,27 +1,22 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
+  FlatList,
   Modal,
+  PermissionsAndroid,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  FlatList,
-  PermissionsAndroid,
-  Platform,
 } from "react-native";
 import Voice from "@react-native-voice/voice";
 import { useTranslation } from "react-i18next";
-import { getPOIs, searchPois } from "../api/mockApi";
+import MicrofoneIcon from "../assets/microfone.svg";
+import SearchIcon from "../assets/search.svg";
+import { getApiErrorMessage, getPOIs, searchPois } from "../api/mockApi";
 
-const EXTRA_GAP = 40;
-
-
-const fmtKm = (n) =>
-  new Intl.NumberFormat(i18n.language?.startsWith("en") ? "en-US" : "pt-PT", {
-    minimumFractionDigits: 1,
-    maximumFractionDigits: 1,
-  }).format(n);
+const EXTRA_GAP = 56;
 
 function norm(str) {
   return (str ?? "")
@@ -40,43 +35,42 @@ function dice(a, b) {
   if (a.length < 2 || b.length < 2) return 0;
 
   const bigrams = new Map();
-  for (let i = 0; i < a.length - 1; i++) {
-    const bg = a.slice(i, i + 2);
+  for (let index = 0; index < a.length - 1; index++) {
+    const bg = a.slice(index, index + 2);
     bigrams.set(bg, (bigrams.get(bg) || 0) + 1);
   }
 
   let inter = 0;
-  for (let i = 0; i < b.length - 1; i++) {
-    const bg = b.slice(i, i + 2);
-    const c = bigrams.get(bg) || 0;
-    if (c > 0) {
-      bigrams.set(bg, c - 1);
+  for (let index = 0; index < b.length - 1; index++) {
+    const bg = b.slice(index, index + 2);
+    const count = bigrams.get(bg) || 0;
+    if (count > 0) {
+      bigrams.set(bg, count - 1);
       inter++;
     }
   }
 
-  return (2 * inter) / ((a.length - 1) + (b.length - 1));
+  return (2 * inter) / (a.length - 1 + (b.length - 1));
 }
 
 function bestPoiMatch(spoken, pois) {
   const q = norm(spoken);
   if (!q) return null;
 
-  const qTokens = q.split(" ").filter(t => t.length >= 3);
+  const qTokens = q.split(" ").filter((token) => token.length >= 3);
 
   let best = null;
   let bestScore = 0;
 
-  for (const p of pois) {
-    const title = norm(p.title);
+  for (const poi of pois) {
+    const title = norm(poi.title);
     if (!title) continue;
-
 
     let score = dice(q, title);
 
     if (qTokens.length) {
-      const hits = qTokens.filter(t => title.includes(t)).length;
-      const tokenBonus = hits / qTokens.length; 
+      const hits = qTokens.filter((token) => title.includes(token)).length;
+      const tokenBonus = hits / qTokens.length;
       score = score * 0.78 + tokenBonus * 0.22;
     }
 
@@ -84,7 +78,7 @@ function bestPoiMatch(spoken, pois) {
 
     if (score > bestScore) {
       bestScore = score;
-      best = p;
+      best = poi;
     }
   }
 
@@ -97,19 +91,83 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
   const [results, setResults] = useState([]);
   const [listening, setListening] = useState(false);
   const [heardText, setHeardText] = useState("");
-
+  const [searchErrorMessage, setSearchErrorMessage] = useState("");
+  const finishVoiceWithTextRef = useRef(null);
 
   const { i18n, t } = useTranslation();
 
   const load = async (query) => {
-    const r = await searchPois(query);
-    setResults(r);
+    try {
+      const response = await searchPois(query);
+      setResults(response);
+      setSearchErrorMessage("");
+    } catch (error) {
+      setResults([]);
+      setSearchErrorMessage(
+        getApiErrorMessage(error, "Nao foi possivel pesquisar os destinos.")
+      );
+    }
   };
 
   useEffect(() => {
     if (!open) return;
     load(q);
-  }, [q, open]);
+  }, [open, q]);
+
+  async function stopVoice() {
+    try {
+      await Voice.stop();
+    } catch {}
+    setListening(false);
+  }
+
+  async function finishVoiceWithText(text) {
+    await stopVoice();
+
+    try {
+      const pois = await getPOIs();
+      setSearchErrorMessage("");
+      const match = bestPoiMatch(text, pois);
+
+      if (match?.poi && match.score >= 0.52) {
+        pick(match.poi);
+        return;
+      }
+
+      setQ(text);
+      setOpen(true);
+      await load(text);
+    } catch (error) {
+      setSearchErrorMessage(
+        getApiErrorMessage(error, "Nao foi possivel carregar os destinos.")
+      );
+      setQ(text);
+      setOpen(true);
+      await load(text);
+    }
+  }
+
+  finishVoiceWithTextRef.current = finishVoiceWithText;
+
+  useEffect(() => {
+    Voice.onSpeechResults = (event) => {
+      const text = event?.value?.[0] ?? "";
+      if (!text) return;
+      setHeardText(text);
+      finishVoiceWithTextRef.current?.(text);
+    };
+
+    Voice.onSpeechError = () => {
+      try {
+        Voice.stop();
+      } catch {}
+      setListening(false);
+    };
+
+    return () => {
+      Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
+    };
+  }, []);
 
   const openModal = async () => {
     setOpen(true);
@@ -119,27 +177,9 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
   const pick = (item) => {
     setOpen(false);
     setQ("");
+    setSearchErrorMessage("");
     onPickDestination?.(item);
   };
-
-
-  useEffect(() => {
-    Voice.onSpeechResults = (e) => {
-      const text = e?.value?.[0] ?? "";
-      if (!text) return;
-      setHeardText(text);
-      finishVoiceWithText(text);
-    };
-
-    Voice.onSpeechError = () => {
-      stopVoice();
-    };
-
-    return () => {
-      Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
-    };
-  
-  }, []);
 
   const ensureMicPermission = async () => {
     if (Platform.OS !== "android") return true;
@@ -157,69 +197,40 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
     setListening(true);
 
     try {
-
-     const locale = i18n.language?.startsWith("en") ? "en-US" : "pt-PT";
-     await Voice.start(locale);
-
+      const locale = i18n.language?.startsWith("en") ? "en-US" : "pt-PT";
+      await Voice.start(locale);
     } catch {
       setListening(false);
-    }
-  };
-
-  const stopVoice = async () => {
-    try { await Voice.stop(); } catch {}
-    setListening(false);
-  };
-
-  const finishVoiceWithText = async (text) => {
-    await stopVoice();
-
-    try {
-      const pois = await getPOIs();
-      const match = bestPoiMatch(text, pois);
-
-
-      if (match?.poi && match.score >= 0.52) {
-        pick(match.poi); 
-        return;
-      }
-
-      setQ(text);
-      setOpen(true);
-      await load(text);
-    } catch {
-      setQ(text);
-      setOpen(true);
-      await load(text);
     }
   };
 
   return (
     <>
       <View style={[styles.panel, { bottom: bottomOffset + EXTRA_GAP }]}>
-        <View style={styles.handle} />
         <View style={styles.searchRow}>
           <Pressable style={styles.searchTapArea} onPress={openModal}>
             <View style={styles.leftCircle}>
-              <Text style={{ fontSize: 16 }}>🔍</Text>
+              <SearchIcon width={18} height={18} color="#6B7A88" />
             </View>
             <Text style={styles.title}>{t("exploreSearch.where_to")}</Text>
           </Pressable>
 
-        
-         <Pressable style={styles.rightCircle} onPress={startVoice} accessibilityLabel={t("a11y.voice_search")}>
-            <Text style={{ color: "#fff", fontWeight: "900" }}>🎤</Text>
+          <Pressable
+            style={styles.rightCircle}
+            onPress={startVoice}
+            accessibilityLabel={t("a11y.voice_search")}
+          >
+            <MicrofoneIcon width={14} height={18} color="#FFFFFF" />
           </Pressable>
         </View>
       </View>
 
-      
       <Modal visible={listening} transparent animationType="fade">
         <View style={styles.listenBackdrop}>
           <View style={styles.listenCard}>
             <Text style={styles.listenTitle}>{t("exploreSearch.listening_title")}</Text>
             <Text style={styles.listenSub} numberOfLines={2}>
-              {heardText ? `“${heardText}”` : t("exploreSearch.listening_hint")}
+              {heardText ? `"${heardText}"` : t("exploreSearch.listening_hint")}
             </Text>
 
             <Pressable style={styles.listenCancel} onPress={stopVoice}>
@@ -229,7 +240,6 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
         </View>
       </Modal>
 
-   
       <Modal
         visible={open}
         transparent
@@ -240,7 +250,9 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
 
         <View style={[styles.sheet, { bottom: bottomOffset - 8 }]}>
           <View style={styles.sheetTop}>
-            <Text style={styles.backChevron}>‹</Text>
+            <Pressable onPress={() => setOpen(false)} hitSlop={10}>
+              <Text style={styles.backChevron}>{"<"}</Text>
+            </Pressable>
 
             <TextInput
               value={q}
@@ -251,14 +263,26 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
               autoFocus
             />
 
-            <View style={styles.pencilCircle}>
-              <Text style={{ color: "#fff", fontWeight: "900" }}>✎</Text>
-            </View>
+            <Pressable
+              style={styles.pencilCircle}
+              onPress={startVoice}
+              accessibilityLabel={t("a11y.voice_search")}
+            >
+              <MicrofoneIcon width={14} height={18} color="#FFFFFF" />
+            </Pressable>
           </View>
 
           <FlatList
             data={results}
             keyExtractor={(item) => String(item.id)}
+            keyboardShouldPersistTaps="handled"
+            ListEmptyComponent={
+              searchErrorMessage ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>{searchErrorMessage}</Text>
+                </View>
+              ) : null
+            }
             contentContainerStyle={{ paddingBottom: 10 }}
             renderItem={({ item, index }) => (
               <Pressable
@@ -291,31 +315,18 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 16,
-    backgroundColor: "#F1F3F6",
-    borderRadius: 22,
-    paddingTop: 10,
-    paddingBottom: 14,
-    paddingHorizontal: 12,
-    elevation: 18,
+    backgroundColor: "transparent",
   },
-  handle: {
-    width: 54,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#C9D1DA",
-    alignSelf: "center",
-    marginBottom: 10,
-  },
-
   searchRow: {
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#fff",
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.08)",
     flexDirection: "row",
     alignItems: "center",
     paddingLeft: 10,
     paddingRight: 6,
-    elevation: 10,
   },
   searchTapArea: {
     flex: 1,
@@ -323,7 +334,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-
   leftCircle: {
     width: 34,
     height: 34,
@@ -333,29 +343,45 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   rightCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: "#F18F01",
     alignItems: "center",
     justifyContent: "center",
   },
-  title: { fontSize: 16, fontWeight: "800", color: "#6B7A88" },
-
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.20)" },
+  title: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#6B7A88",
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
   sheet: {
     position: "absolute",
     left: 16,
     right: 16,
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 22,
     padding: 14,
-    elevation: 30,
+    borderWidth: 1,
+    borderColor: "rgba(11,45,77,0.08)",
     maxHeight: "55%",
   },
-  sheetTop: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
-  backChevron: { fontSize: 26, color: "#6B7A88", width: 18 },
-
+  sheetTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginBottom: 12,
+  },
+  backChevron: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#6B7A88",
+    width: 14,
+  },
   input: {
     flex: 1,
     backgroundColor: "#F3F5F7",
@@ -373,7 +399,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   rowItem: {
     paddingVertical: 12,
     paddingHorizontal: 10,
@@ -382,19 +407,57 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  rowActive: { backgroundColor: "#F18F01" },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#C9D1DA" },
-  dotActive: { backgroundColor: "#fff" },
-
-  itemTitle: { fontWeight: "900", color: "#0B2D4D" },
-  itemTitleActive: { color: "#fff" },
-  itemSub: { fontSize: 10, fontWeight: "800", color: "#6B7A88", marginTop: 2 },
-  itemSubActive: { color: "#fff" },
-
-  km: { fontWeight: "900", color: "#0B2D4D" },
-  kmActive: { color: "#fff" },
-
-  // Listening UI
+  errorBox: {
+    marginTop: 8,
+    marginBottom: 10,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    backgroundColor: "#FFF4E8",
+    borderWidth: 1,
+    borderColor: "rgba(241,143,1,0.26)",
+  },
+  errorText: {
+    color: "#8A4B00",
+    fontWeight: "800",
+    textAlign: "center",
+    lineHeight: 20,
+  },
+  rowActive: {
+    backgroundColor: "#F18F01",
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#C9D1DA",
+  },
+  dotActive: {
+    backgroundColor: "#FFFFFF",
+  },
+  itemTitle: {
+    fontWeight: "900",
+    color: "#0B2D4D",
+  },
+  itemTitleActive: {
+    color: "#FFFFFF",
+  },
+  itemSub: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#6B7A88",
+    marginTop: 2,
+  },
+  itemSubActive: {
+    color: "#FFFFFF",
+  },
+  km: {
+    fontWeight: "900",
+    color: "#0B2D4D",
+  },
+  kmActive: {
+    color: "#FFFFFF",
+  },
   listenBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.25)",
@@ -404,13 +467,21 @@ const styles = StyleSheet.create({
   },
   listenCard: {
     width: "100%",
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderRadius: 20,
     padding: 16,
     elevation: 22,
   },
-  listenTitle: { fontSize: 16, fontWeight: "900", color: "#0B2D4D" },
-  listenSub: { marginTop: 8, fontWeight: "800", color: "#6B7A88" },
+  listenTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: "#0B2D4D",
+  },
+  listenSub: {
+    marginTop: 8,
+    fontWeight: "800",
+    color: "#6B7A88",
+  },
   listenCancel: {
     marginTop: 14,
     height: 42,
@@ -419,5 +490,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  listenCancelText: { color: "#fff", fontWeight: "900" },
+  listenCancelText: {
+    color: "#FFFFFF",
+    fontWeight: "900",
+  },
 });

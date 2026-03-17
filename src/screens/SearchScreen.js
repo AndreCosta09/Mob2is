@@ -21,7 +21,7 @@ import AnimatedPressable from "./search/AnimatedPressable";
 import CategoryRow from "./search/CategoryRow";
 import PoiCard from "./search/PoiCard";
 
-import { fetchCategories, fetchPoisByCategory } from "../api/mockApi";
+import { fetchCategories, fetchPoisByCategory, getApiErrorMessage } from "../api/mockApi";
 
 import Mob2isLogo from "../assets/logo/logo.svg";
 
@@ -36,6 +36,8 @@ export default function SearchScreen({ navigation }) {
 
   const [pois, setPois] = useState([]);
   const [selectedPoi, setSelectedPoi] = useState(null);
+  const [categoriesErrorMessage, setCategoriesErrorMessage] = useState("");
+  const [poisErrorMessage, setPoisErrorMessage] = useState("");
 
   const [loadingPois, setLoadingPois] = useState(false);
 
@@ -85,14 +87,21 @@ export default function SearchScreen({ navigation }) {
 
   useEffect(() => {
     (async () => {
-      const c = await fetchCategories();
-      setCategories(
-        c.map((cat) => ({
-          ...cat,
-          key: cat.key ?? categoryKeyFromName(cat.name),
-        }))
-      );
-
+      try {
+        const c = await fetchCategories();
+        setCategories(
+          c.map((cat) => ({
+            ...cat,
+            key: cat.key ?? categoryKeyFromName(cat.name),
+          }))
+        );
+        setCategoriesErrorMessage("");
+      } catch (error) {
+        setCategories([]);
+        setCategoriesErrorMessage(
+          getApiErrorMessage(error, "Nao foi possivel carregar as categorias.")
+        );
+      }
     })();
   }, []);
 
@@ -108,11 +117,21 @@ export default function SearchScreen({ navigation }) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelectedCat(cat);
     setSelectedPoi(null);
+    setPoisErrorMessage("");
 
     setLoadingPois(true);
-    const list = await fetchPoisByCategory(cat.id);
-    setPois(list);
-    setLoadingPois(false);
+    try {
+      const list = await fetchPoisByCategory(cat.id);
+      setPois(list);
+      setPoisErrorMessage("");
+    } catch (error) {
+      setPois([]);
+      setPoisErrorMessage(
+        getApiErrorMessage(error, "Nao foi possivel carregar os locais desta categoria.")
+      );
+    } finally {
+      setLoadingPois(false);
+    }
   };
 
   const back = () => {
@@ -124,6 +143,7 @@ export default function SearchScreen({ navigation }) {
     }
     setSelectedCat(null);
     setPois([]);
+    setPoisErrorMessage("");
   };
 
   const openPoi = (poi) => {
@@ -263,6 +283,10 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
             <View style={{ padding: 14 }}>
               <Text style={{ color: C.muted, fontWeight: "800" }}>{t("common.loading")}</Text>
             </View>
+          ) : poisErrorMessage ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{poisErrorMessage}</Text>
+            </View>
           ) : (
             <FlatList
               data={pois}
@@ -290,7 +314,12 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
       </View>
 
       <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
-        
+        {categoriesErrorMessage ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{categoriesErrorMessage}</Text>
+          </View>
+        ) : null}
+
         <FlatList
           data={categoriesUi}
           keyExtractor={(c) => c.id}
@@ -316,6 +345,23 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: C.bg },
+  errorBox: {
+    marginHorizontal: 14,
+    marginTop: 12,
+    marginBottom: 2,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#FFF4E8",
+    borderWidth: 1,
+    borderColor: "rgba(241,143,1,0.26)",
+  },
+  errorText: {
+    color: "#8A4B00",
+    fontWeight: "800",
+    textAlign: "center",
+    lineHeight: 20,
+  },
 
       bgLogo: {
       position: "absolute",

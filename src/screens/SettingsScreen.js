@@ -1,9 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, Pressable, Switch, ScrollView } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
-
 
 const C = {
   bg: "#F3F5F7",
@@ -11,7 +17,6 @@ const C = {
   muted: "rgba(11,45,77,0.62)",
   card: "#FFFFFF",
   stroke: "rgba(11,45,77,0.08)",
-  orange: "#F09C1F",
   blueDark: "#051F41",
 };
 
@@ -21,7 +26,7 @@ const KEY_LANG = "mob2is_lang_v1";
 function Row({ title, subtitle, right }) {
   return (
     <View style={styles.row}>
-      <View style={{ flex: 1 }}>
+      <View style={styles.rowTextWrap}>
         <Text style={styles.rowTitle}>{title}</Text>
         {!!subtitle && <Text style={styles.rowSub}>{subtitle}</Text>}
       </View>
@@ -41,7 +46,9 @@ function Segmented({ value, options, onChange }) {
             onPress={() => onChange(opt.value)}
             style={[styles.segBtn, active && styles.segBtnActive]}
           >
-            <Text style={[styles.segText, active && styles.segTextActive]}>{opt.label}</Text>
+            <Text style={[styles.segText, active && styles.segTextActive]}>
+              {opt.label}
+            </Text>
           </Pressable>
         );
       })}
@@ -53,28 +60,33 @@ export default function SettingsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { t, i18n } = useTranslation();
 
-
   const [prefs, setPrefs] = useState({
     notifications: true,
     useLocation: true,
     reduceMotion: false,
     highContrast: false,
   });
-
   const [lang, setLang] = useState(i18n.language || "pt");
 
   useEffect(() => {
     (async () => {
-      const [[, rawPrefs], [, storedLang]] = await AsyncStorage.multiGet([KEY_PREFS, KEY_LANG]);
+      const [[, rawPrefs], [, storedLang]] = await AsyncStorage.multiGet([
+        KEY_PREFS,
+        KEY_LANG,
+      ]);
+
       if (rawPrefs) {
-        try { setPrefs(JSON.parse(rawPrefs)); } catch {}
+        try {
+          setPrefs(JSON.parse(rawPrefs));
+        } catch {}
       }
+
       if (storedLang) {
         setLang(storedLang);
         i18n.changeLanguage(storedLang);
       }
     })();
-  }, []);
+  }, [i18n]);
 
   const savePrefs = async (next) => {
     setPrefs(next);
@@ -91,6 +103,7 @@ export default function SettingsScreen({ navigation }) {
   const changeLang = async (nextLang) => {
     setLang(nextLang);
     i18n.changeLanguage(nextLang);
+
     try {
       await AsyncStorage.setItem(KEY_LANG, nextLang);
     } catch {}
@@ -102,13 +115,13 @@ export default function SettingsScreen({ navigation }) {
     <View style={[styles.page, { paddingTop: topPad }]}>
       <View style={styles.topBar}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backTxt}>‹</Text>
+          <Text style={styles.backTxt}>{"<"}</Text>
         </Pressable>
         <Text style={styles.title}>{t("settings.title")}</Text>
-        <View style={{ width: 40 }} />
+        <View style={styles.sidePlaceholder} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("settings.section.language")}</Text>
 
@@ -128,7 +141,7 @@ export default function SettingsScreen({ navigation }) {
           />
         </View>
 
-        <View style={{ height: 12 }} />
+        <View style={styles.blockSpacer} />
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("settings.section.general")}</Text>
@@ -136,7 +149,12 @@ export default function SettingsScreen({ navigation }) {
           <Row
             title={t("settings.notifications")}
             subtitle={t("settings.notifications_sub")}
-            right={<Switch value={prefs.notifications} onValueChange={() => toggle("notifications")} />}
+            right={
+              <Switch
+                value={prefs.notifications}
+                onValueChange={() => toggle("notifications")}
+              />
+            }
           />
 
           <View style={styles.sep} />
@@ -144,11 +162,16 @@ export default function SettingsScreen({ navigation }) {
           <Row
             title={t("settings.location")}
             subtitle={t("settings.location_sub")}
-            right={<Switch value={prefs.useLocation} onValueChange={() => toggle("useLocation")} />}
+            right={
+              <Switch
+                value={prefs.useLocation}
+                onValueChange={() => toggle("useLocation")}
+              />
+            }
           />
         </View>
 
-        <View style={{ height: 12 }} />
+        <View style={styles.blockSpacer} />
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("settings.section.accessibility")}</Text>
@@ -156,7 +179,12 @@ export default function SettingsScreen({ navigation }) {
           <Row
             title={t("settings.reduce_motion")}
             subtitle={t("settings.reduce_motion_sub")}
-            right={<Switch value={prefs.reduceMotion} onValueChange={() => toggle("reduceMotion")} />}
+            right={
+              <Switch
+                value={prefs.reduceMotion}
+                onValueChange={() => toggle("reduceMotion")}
+              />
+            }
           />
 
           <View style={styles.sep} />
@@ -164,7 +192,12 @@ export default function SettingsScreen({ navigation }) {
           <Row
             title={t("settings.high_contrast")}
             subtitle={t("settings.high_contrast_sub")}
-            right={<Switch value={prefs.highContrast} onValueChange={() => toggle("highContrast")} />}
+            right={
+              <Switch
+                value={prefs.highContrast}
+                onValueChange={() => toggle("highContrast")}
+              />
+            }
           />
         </View>
       </ScrollView>
@@ -173,7 +206,11 @@ export default function SettingsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14 },
+  page: {
+    flex: 1,
+    backgroundColor: C.bg,
+    paddingHorizontal: 14,
+  },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -190,9 +227,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  backTxt: { fontSize: 26, fontWeight: "900", color: C.text, marginTop: -2 },
-  title: { fontSize: 18, fontWeight: "900", color: C.text },
-
+  backTxt: {
+    fontSize: 26,
+    fontWeight: "900",
+    color: C.text,
+    marginTop: -2,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: C.text,
+  },
+  sidePlaceholder: {
+    width: 40,
+  },
+  scrollContent: {
+    paddingBottom: 24,
+  },
+  blockSpacer: {
+    height: 12,
+  },
   card: {
     backgroundColor: C.card,
     borderRadius: 22,
@@ -200,22 +254,57 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.stroke,
   },
-  sectionTitle: { fontSize: 12, fontWeight: "900", color: C.muted, marginBottom: 10 },
-
-  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 6 },
-  rowTitle: { fontSize: 14, fontWeight: "900", color: C.text },
-  rowSub: { marginTop: 2, fontSize: 12, fontWeight: "800", color: C.muted },
-
-  sep: { height: 1, backgroundColor: "rgba(11,45,77,0.08)", marginHorizontal: 6 },
-
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: C.muted,
+    marginBottom: 10,
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+  },
+  rowTextWrap: {
+    flex: 1,
+  },
+  rowTitle: {
+    fontSize: 14,
+    fontWeight: "900",
+    color: C.text,
+  },
+  rowSub: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "800",
+    color: C.muted,
+  },
+  sep: {
+    height: 1,
+    backgroundColor: "rgba(11,45,77,0.08)",
+    marginHorizontal: 6,
+  },
   segment: {
     flexDirection: "row",
     backgroundColor: "rgba(11,45,77,0.06)",
     borderRadius: 14,
     padding: 3,
   },
-  segBtn: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12 },
-  segBtnActive: { backgroundColor: C.blueDark },
-  segText: { fontWeight: "900", color: "rgba(11,45,77,0.70)", fontSize: 12 },
-  segTextActive: { color: "#FFFFFF" },
+  segBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+  },
+  segBtnActive: {
+    backgroundColor: C.blueDark,
+  },
+  segText: {
+    fontWeight: "900",
+    color: "rgba(11,45,77,0.70)",
+    fontSize: 12,
+  },
+  segTextActive: {
+    color: "#FFFFFF",
+  },
 });

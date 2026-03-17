@@ -77,6 +77,47 @@ function formatKm(value) {
   return `${n.toFixed(1).replace(".", ",")} km`;
 }
 
+function formatPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0%";
+  return `${n.toFixed(1).replace(".0", "").replace(".", ",")}%`;
+}
+
+function mapAccessibilityValueToDot(value) {
+  const n = Number(value);
+  if (n >= 3) return "g";
+  if (n >= 2) return "y";
+  if (n >= 1) return "r";
+  return "g";
+}
+
+function buildAccessibilitySummary(values = []) {
+  const arr = Array.isArray(values)
+    ? values.map((value) => Number(value)).filter(Number.isFinite)
+    : [];
+
+  if (!arr.length) {
+    return {
+      dots: [],
+      highPct: "0%",
+      mediumPct: "0%",
+      lowPct: "0%",
+    };
+  }
+
+  const highCount = arr.filter((value) => value >= 3).length;
+  const mediumCount = arr.filter((value) => value >= 2 && value < 3).length;
+  const lowCount = arr.filter((value) => value >= 1 && value < 2).length;
+  const total = arr.length;
+
+  return {
+    dots: arr.map(mapAccessibilityValueToDot),
+    highPct: formatPercent((highCount / total) * 100),
+    mediumPct: formatPercent((mediumCount / total) * 100),
+    lowPct: formatPercent((lowCount / total) * 100),
+  };
+}
+
 function IconPlay({ size = 14, color = "#051F41" }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -311,6 +352,12 @@ export default function NavigationSheet({
     return order.map((perfil) => {
       const base = STATIC_PROFILE_UI[perfil];
       const api = apiProfilesByKey.get(perfil);
+      const accessValues =
+        api?.arrayAcessibilidadeNormalizada ?? api?.ArrayAcessibilidadeNormalizada ?? [];
+      const accessSummary = buildAccessibilitySummary(accessValues);
+      const hasDynamicAccessSummary = Array.isArray(accessValues) && accessValues.length > 0;
+      const decliveValue = Number(api?.declive);
+      const stepsValue = Number(api?.pct_escadas);
 
       return {
         perfil,
@@ -328,14 +375,14 @@ export default function NavigationSheet({
           Number(api?.estimated_time_min) > 0
             ? Number(api.estimated_time_min)
             : etaMin || 0,
-        dots: base.dots,
-        slopePct: base.slopePct,
-        stepsPct: base.stepsPct,
-        highPct: base.highPct,
-        mediumPct: base.mediumPct,
-        lowPct: base.lowPct,
-        lowSlopeText: base.lowSlopeText,
-        lowStepsText: base.lowStepsText,
+        dots: hasDynamicAccessSummary ? accessSummary.dots : base.dots,
+        slopePct: Number.isFinite(decliveValue) ? formatPercent(decliveValue) : base.slopePct,
+        stepsPct: Number.isFinite(stepsValue) ? formatPercent(stepsValue) : base.stepsPct,
+        highPct: hasDynamicAccessSummary ? accessSummary.highPct : base.highPct,
+        mediumPct: hasDynamicAccessSummary ? accessSummary.mediumPct : base.mediumPct,
+        lowPct: hasDynamicAccessSummary ? accessSummary.lowPct : base.lowPct,
+        lowSlopeText: Number.isFinite(decliveValue) ? "Declive medio da rota" : base.lowSlopeText,
+        lowStepsText: Number.isFinite(stepsValue) ? "Percurso com escadas" : base.lowStepsText,
       };
     });
   }, [apiProfilesByKey, etaMin]);

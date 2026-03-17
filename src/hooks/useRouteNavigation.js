@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Platform, PermissionsAndroid } from "react-native";
+import { Alert, Linking } from "react-native";
 import Geolocation from "react-native-geolocation-service";
 
-import { calculateRouteMultiObjective, getClassifiedStreets, VIANA_COORDS } from "../api/mockApi";
+import {
+  calculateRouteMultiObjective,
+  getApiErrorMessage,
+  getClassifiedStreets,
+  VIANA_COORDS,
+} from "../api/mockApi";
 import { extractLinesFromCaminho, haversineMeters, splitLineOnGaps } from "../utils/map/geo";
 import {
   buildRouteGeojsonFromCaminho,
-  buildRouteGeojsonFromPontos,
   buildStreetIndex,
   estimateEtaMinutesFromLines,
 } from "../utils/map/route";
-
-const DEV_FORCE_LOCATION = true;
-const DEV_FIXED_COORD = [-8.846155, 41.693145]; 
+import {
+  DEV_STATIC_LOCATION_COORDS,
+  ensureLocationReady,
+  shouldUseDevStaticLocation,
+} from "../utils/locationPermission";
 
 function mapConditionToIncapacidade(conditionKey) {
   if (conditionKey === "asd") return "Autismo";
@@ -25,15 +31,17 @@ function isCustomDestinationPoi(poi) {
 }
 
 function routeSignature(route) {
-  if (Array.isArray(route?.pontos) && route.pontos.length) {
-    return `p:${route.pontos.join(">")}`;
-  }
-
   if (Array.isArray(route?.caminho) && route.caminho.length) {
     return `c:${JSON.stringify(route.caminho)}`;
   }
 
   return `perfil:${route?.perfil ?? "unknown"}`;
+}
+
+function normalizePreferredPerfil(value) {
+  return value === "rapida" || value === "acessivel" || value === "equilibrada"
+    ? value
+    : "equilibrada";
 }
 
 function dedupeMultiRoutes(rotas = []) {
@@ -69,16 +77,19 @@ function bearingDeg([lng1, lat1], [lng2, lat2]) {
   const toRad = (d) => (d * Math.PI) / 180;
   const toDeg = (r) => (r * 180) / Math.PI;
 
-  const φ1 = toRad(lat1);
-  const φ2 = toRad(lat2);
-  const Δλ = toRad(lng2 - lng1);
+  const lat1Rad = toRad(lat1);
+  const lat2Rad = toRad(lat2);
+  const lngDeltaRad = toRad(lng2 - lng1);
 
-  const y = Math.sin(Δλ) * Math.cos(φ2);
-  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  const y = Math.sin(lngDeltaRad) * Math.cos(lat2Rad);
+  const x =
+    Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+    Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(lngDeltaRad);
 
-  const θ = Math.atan2(y, x);
-  return (toDeg(θ) + 360) % 360;
+  const bearingRad = Math.atan2(y, x);
+  return (toDeg(bearingRad) + 360) % 360;
 }
+
 
 function lerpAngle(a, b, t) {
   const d = ((b - a + 540) % 360) - 180;
@@ -161,11 +172,22 @@ function distanceToRouteMeters(userLngLat, flatCoords, cursorIdx) {
   return best;
 }
 
-export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { top: 0, bottom: 0 }, condition }) {
+export default function useRouteNavigation({
+  cameraRef,
+  tabBarH = 0,
+  insets = { top: 0, bottom: 0 },
+  condition,
+  routePreference,
+}) {
   const conditionRef = useRef(condition);
   useEffect(() => {
     conditionRef.current = condition;
   }, [condition]);
+
+  const routePreferenceRef = useRef(normalizePreferredPerfil(routePreference));
+  useEffect(() => {
+    routePreferenceRef.current = normalizePreferredPerfil(routePreference);
+  }, [routePreference]);
 
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -175,7 +197,9 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const [navSheetOpen, setNavSheetOpen] = useState(false);
 
   const [routeOptions, setRouteOptions] = useState([]);
-  const [selectedPerfil, setSelectedPerfil] = useState("equilibrada");
+  const [selectedPerfil, setSelectedPerfil] = useState(
+    normalizePreferredPerfil(routePreference)
+  );
   const [following, setFollowing] = useState(false);
 
   const [activePerfil, setActivePerfil] = useState(null);
@@ -195,14 +219,14 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const [routeSegments, setRouteSegments] = useState([]);
   const [etaMin, setEtaMin] = useState(0);
 
-  // Localização
+  // LocalizaÃƒÂ§ÃƒÂ£o
   const [userCoord, setUserCoord] = useState(null);
   const didCenterOnUser = useRef(false);
 
   // Ruas indexadas
-  const streetsIndexRef = useRef(null);
 
-  // Cache rota (progressão)
+  // Cache rota (progressÃƒÂ£o)
+  const streetsIndexRef = useRef(null);
   const routeNormRef = useRef(null);
   const flatCoordsRef = useRef([]);
   const indexMapRef = useRef([]);
@@ -221,9 +245,20 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const lastRecalcAtRef = useRef(0);
   const offRouteCountRef = useRef(0);
 
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [routeCalculationMessage, setRouteCalculationMessage] = useState(
+    "A calcular a melhor rota para si"
+  );
+  const [apiErrorMessage, setApiErrorMessage] = useState("");
+
 
 
   const [classifiedStreetsRaw, setClassifiedStreetsRaw] = useState([]);
+
+  useEffect(() => {
+    if (routeActive) return;
+    setSelectedPerfil(normalizePreferredPerfil(routePreference));
+  }, [routeActive, routePreference]);
 
   const setCam = (opts) => {
     if (!cameraRef?.current?.setCamera) return;
@@ -427,22 +462,17 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   }
 
   const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
-  const pontos = Array.isArray(pd?.pontos) ? pd.pontos : null;
-  const streetsIndex = streetsIndexRef.current;
 
   console.log("[Mob2is] applyPathDataToMap input", {
     perfil: pd?.perfil,
-    pontosCount: Array.isArray(pontos) ? pontos.length : 0,
     caminhoCount: Array.isArray(pd?.caminho) ? pd.caminho.length : 0,
     accessCount: Array.isArray(accessArr) ? accessArr.length : 0,
-    hasStreetIndex: streetsIndex instanceof Map,
   });
 
-  const builtFromPontos =
-    pontos && streetsIndex ? buildRouteGeojsonFromPontos(pontos, accessArr, streetsIndex) : null;
+  const builtFromPontos = null;
 
   if (builtFromPontos?.geojson?.features?.length) {
-    console.log("[Mob2is] rota construída via pontos", {
+    console.log("[Mob2is] rota construÃƒÂ­da via pontos", {
       perfil: pd?.perfil,
       featureCount: builtFromPontos.geojson.features.length,
       segmentCount: builtFromPontos.segments.length,
@@ -473,7 +503,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   const lines = extractLinesFromCaminho(pd?.caminho);
   const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
 
-  console.log("[Mob2is] fallback caminho", {
+  console.log("[Mob2is] rota construida via caminho", {
     perfil: pd?.perfil,
     rawLines: lines.length,
     safeLines: safeLines.length,
@@ -481,7 +511,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
   });
 
   if (!safeLines.length) {
-    console.warn("[Mob2is] sem geometria desenhável na rota", {
+    console.warn("[Mob2is] sem geometria desenhÃƒÂ¡vel na rota", {
       perfil: pd?.perfil,
       pd,
     });
@@ -522,7 +552,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
    const end = customPoint ? null : resolvePoiEnd(selectedPoi);
 
     if (!customPoint && end == null) {
-      throw new Error("POI sem identificador de destino válido (Ponto/graphPointId).");
+      throw new Error("POI sem identificador de destino vÃƒÂ¡lido (Ponto/graphPointId).");
     }
 
     const perfil = activePerfilRef.current ?? null;
@@ -565,6 +595,10 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
     try {
       await recalcRouteFromHere(userLngLat);
+      setApiErrorMessage("");
+    } catch (error) {
+      console.warn("[Mob2is] recalculateRouteFromHere error:", error);
+      setApiErrorMessage(getApiErrorMessage(error, "Nao foi possivel recalcular a rota."));
     } finally {
       routeInFlightRef.current = false;
     }
@@ -595,25 +629,14 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     const start = async () => {
       try {
 
-        if (__DEV__ && DEV_FORCE_LOCATION) {
-          console.log("[Mob2is] A usar localização fixa de desenvolvimento", {
-            lng: DEV_FIXED_COORD[0],
-            lat: DEV_FIXED_COORD[1],
+        if (shouldUseDevStaticLocation()) {
+          console.log("[Mob2is] A usar localizaÃƒÂ§ÃƒÂ£o fixa de desenvolvimento", {
+            lng: DEV_STATIC_LOCATION_COORDS[0],
+            lat: DEV_STATIC_LOCATION_COORDS[1],
           });
-          applyLocation(DEV_FIXED_COORD[0], DEV_FIXED_COORD[1]);
+          applyLocation(DEV_STATIC_LOCATION_COORDS[0], DEV_STATIC_LOCATION_COORDS[1]);
           return;
         }
-        if (Platform.OS === "android") {
-          const fine = PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION;
-          const already = await PermissionsAndroid.check(fine);
-          const granted = already ? PermissionsAndroid.RESULTS.GRANTED : await PermissionsAndroid.request(fine);
-
-          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-            console.warn("[Mob2is] Permissão de localização recusada.");
-            return;
-          }
-        }
-
         watchId = Geolocation.watchPosition(
           (pos) => {
             if (!alive) return;
@@ -657,9 +680,13 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
           if (alive) {
             streetsIndexRef.current = idx;
             setClassifiedStreetsRaw(Array.isArray(raw) ? raw : []);
+            setApiErrorMessage("");
           }
         } catch (e) {
           console.warn("getClassifiedStreets error:", e);
+          if (alive) {
+            setApiErrorMessage(getApiErrorMessage(e, "Nao foi possivel carregar a acessibilidade das ruas."));
+          }
         }
       })();
 
@@ -678,7 +705,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
     setFollowing(false);
     setRouteOptions([]);
-    setSelectedPerfil("equilibrada");
+    setSelectedPerfil(routePreferenceRef.current);
     setActivePerfil(null);
 
     setRouteFullGeojson(null);
@@ -720,7 +747,7 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
     setFollowing(false);
     setRouteOptions([]);
-    setSelectedPerfil("equilibrada");
+    setSelectedPerfil(routePreferenceRef.current);
     setActivePerfil(null);
 
     setDetailsOpen(false);
@@ -741,40 +768,92 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     }
   };
 
- const startNavigation = async (poiArg) => {
+  const handleRouteLocationFailure = (status) => {
+    if (status === "denied") {
+      Alert.alert(
+        "Permissao de localizacao necessaria",
+        "Para calcular a rota, permita o acesso a localizacao nas definicoes do dispositivo.",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Abrir definicoes",
+            onPress: () => {
+              Linking.openSettings().catch((error) => {
+                console.warn("[Mob2is] Nao foi possivel abrir as definicoes:", error);
+              });
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Ative a localizacao",
+      "Antes de calcular a rota, ative a localizacao do dispositivo e volte a tentar.",
+      [{ text: "OK" }]
+    );
+  };
+
+  const ensureLocationForRoute = async () => {
+    const locationState = await ensureLocationReady({ prompt: true });
+
+    if (!locationState.ok) {
+      handleRouteLocationFailure(locationState.status);
+      return null;
+    }
+
+    if (Array.isArray(locationState.coords)) {
+      applyLocation(locationState.coords[0], locationState.coords[1]);
+      return locationState.coords;
+    }
+
+    return null;
+  };
+
+const startNavigation = async (poiArg) => {
   const poi = poiArg ?? selectedPoi;
   if (!poi?.coords) return;
 
-  const from = userCoord ?? VIANA_COORDS;
-  const [lng, lat] = from;
   const [lngE, latE] = poi.coords;
 
   const incapacidade = mapConditionToIncapacidade(conditionRef.current);
 
-  const customPoint = isCustomDestinationPoi(poi);
-  const end = customPoint ? null : resolvePoiEnd(poi);
-
-  if (!customPoint && end == null) {
-    console.warn("[Mob2is] POI sem end válido");
+  const end = resolvePoiEnd(poi);
+  if (end == null && !poi?.isCustomPoint) {
+    console.warn("[Mob2is] POI sem end vÃƒÂ¡lido");
     return;
-}
+  }
 
-  setSelectedPoi(poi);
-  setDetailsOpen(false);
-  setNavSheetOpen(false);
-  setFollowing(false);
-  setActivePerfil(null);
+  setIsCalculatingRoute(true);
+  setRouteCalculationMessage("A verificar a sua localizacao");
+  setApiErrorMessage("");
 
   console.log("[Mob2is] startNavigation", {
     poi: poi?.title,
-    end,
+    end: poi?.isCustomPoint ? null : end,
     incapacidade,
   });
 
   try {
+    const from = await ensureLocationForRoute();
+    if (!from) {
+      setDetailsOpen(true);
+      return;
+    }
+
+    const [lng, lat] = from;
+
+    setSelectedPoi(poi);
+    setDetailsOpen(false);
+    setNavSheetOpen(false);
+    setFollowing(false);
+    setActivePerfil(null);
+    setRouteCalculationMessage("A calcular a melhor rota para si");
+
     const resp = await calculateRouteMultiObjective({
       incapacidade,
-      end,
+      end: poi?.isCustomPoint ? null : end,
       lati: lat,
       longi: lng,
       latE,
@@ -784,20 +863,24 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
 
     console.log("[Mob2is] resposta final multi-rota", resp);
 
-   const rotasRaw = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
-   const rotas = dedupeMultiRoutes(rotasRaw);
-
+    const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
     if (!rotas.length) {
       console.warn("[Mob2is] resposta sem rotas");
       setDetailsOpen(true);
       return;
     }
 
+    const preferredOrder = [
+      routePreferenceRef.current,
+      "equilibrada",
+      "rapida",
+      "acessivel",
+    ].filter((perfil, index, arr) => arr.indexOf(perfil) === index);
+
     const pick =
-      rotas.find((r) => r?.perfil === "equilibrada") ||
-      rotas.find((r) => r?.perfil === "rapida") ||
-      rotas.find((r) => r?.perfil === "acessivel") ||
-      rotas[0];
+      preferredOrder
+        .map((perfil) => rotas.find((route) => route?.perfil === perfil))
+        .find(Boolean) || rotas[0];
 
     setRouteOptions(rotas);
     setSelectedPerfil(pick?.perfil ?? "equilibrada");
@@ -816,12 +899,16 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
       return;
     }
 
+    setApiErrorMessage("");
     setNavSheetOpen(true);
   } catch (e) {
     console.warn("calculateRouteMultiObjective error:", e);
+    setApiErrorMessage(getApiErrorMessage(e, "Nao foi possivel calcular a rota."));
     setRouteActive(false);
     setNavSheetOpen(false);
     setDetailsOpen(true);
+  } finally {
+    setIsCalculatingRoute(false);
   }
 };
 
@@ -887,11 +974,11 @@ export default function useRouteNavigation({ cameraRef, tabBarH = 0, insets = { 
     userFeature,
     selectedFeature,
     classifiedStreetsRaw,
-
+    isCalculatingRoute,
+    routeCalculationMessage,
+    apiErrorMessage,
     setDetailsOpen,
     setSelectedPoi,
-
- 
     pickDestination,
     startNavigation,
     previewPerfil,
