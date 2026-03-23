@@ -8,30 +8,13 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 
-import VisualIcon from "../assets/condicao/visual.svg";
-import WheelchairIcon from "../assets/condicao/cadeira_rodas.svg";
-import HearingIcon from "../assets/condicao/auditiva.svg";
-import AutismIcon from "../assets/condicao/autismo.svg";
-import StrollerIcon from "../assets/condicao/gravidas.svg";
-import ElderIcon from "../assets/condicao/idoso.svg";
-
-const CONDITIONS = [
-  { key: "visual", label: "DEFICIÊNCIA VISUAL", color: "#FF6B57", Icon: VisualIcon },
-  { key: "wheelchair", label: "CADEIRA DE RODAS", color: "#8BC34A", Icon: WheelchairIcon },
-  { key: "hearing", label: "DEFICIÊNCIA AUDITIVA", color: "#9C7CF4", Icon: HearingIcon },
-  { key: "asd", label: "ESPECTRO DE AUTISMO (PEA)", color: "#FFD166", Icon: AutismIcon },
-  { key: "stroller", label: "GRÁVIDAS, CRIANÇAS E CARRINHOS", color: "#FF4D6D", Icon: StrollerIcon },
-  { key: "elder", label: "IDOSO COM MOBILIDADE CONDICIONADA", color: "#4FC3F7", Icon: ElderIcon },
-];
-
-
-
+import { CONDITIONS } from "../utils/userProfileOptions";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function ConditionRow({ item, active, onPress }) {
-  
   const [rowW, setRowW] = useState(0);
   const progress = useRef(new Animated.Value(active ? 1 : 0)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -41,11 +24,11 @@ function ConditionRow({ item, active, onPress }) {
       toValue: active ? 1 : 0,
       duration: 280,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: false, 
+      useNativeDriver: false,
     }).start();
   }, [active, progress]);
 
- const MIN_FILL = 65; 
+  const MIN_FILL = 65;
   const fillWidth = useMemo(() => {
     if (!rowW) return 0;
     return progress.interpolate({
@@ -54,17 +37,18 @@ function ConditionRow({ item, active, onPress }) {
     });
   }, [progress, rowW]);
 
-
-  const dotOpacity = useMemo(() => {
-    return progress.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 1],
-    });
-  }, [progress]);
+  const dotOpacity = useMemo(
+    () =>
+      progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+      }),
+    [progress]
+  );
 
   const labelColor = active ? "#0B2D4D" : "#1E2A36";
   const Icon = item.Icon;
-  
+
   return (
     <View style={styles.rowShadow}>
       <AnimatedPressable
@@ -105,16 +89,8 @@ function ConditionRow({ item, active, onPress }) {
         />
 
         <View style={styles.rowContent}>
-
-
-         <View style={[styles.iconBox, { backgroundColor: "transparent" }]}>
-            <Icon
-              width={32}
-              height={32}
-              fill="none"
-
-            />
-
+          <View style={styles.iconBox}>
+            <Icon width={32} height={32} fill="none" />
           </View>
 
           <Text style={[styles.label, { color: labelColor }]} numberOfLines={2}>
@@ -133,6 +109,16 @@ function ConditionRow({ item, active, onPress }) {
 export default function OnboardingScreen({ onDone }) {
   const insets = useSafeAreaInsets();
   const [selected, setSelected] = useState(null);
+  const { t } = useTranslation();
+
+  const translatedConditions = useMemo(
+    () =>
+      CONDITIONS.map((item) => ({
+        ...item,
+        label: t(`onboarding.conditions.${item.key}`),
+      })),
+    [t]
+  );
 
   return (
     <View style={[styles.page, { paddingTop: 18 + insets.top }]}>
@@ -140,19 +126,20 @@ export default function OnboardingScreen({ onDone }) {
       <View pointerEvents="none" style={styles.bgBlobBottom} />
 
       <Text style={styles.title}>
-        Qual é a sua{"\n"}
-        <Text style={styles.titleStrong}>condição?</Text>
+        {t("onboarding.titleLine1")}
+        {"\n"}
+        <Text style={styles.titleStrong}>{t("onboarding.titleStrong")}</Text>
       </Text>
 
       <View style={styles.list}>
-        {CONDITIONS.map((c) => {
-          const active = selected === c.key;
+        {translatedConditions.map((condition) => {
+          const active = selected === condition.key;
           return (
             <ConditionRow
-              key={c.key}
-              item={c}
+              key={condition.key}
+              item={condition}
               active={active}
-              onPress={() => setSelected(c.key)}
+              onPress={() => setSelected(condition.key)}
             />
           );
         })}
@@ -163,7 +150,7 @@ export default function OnboardingScreen({ onDone }) {
         onPress={() => onDone?.(selected)}
         style={[styles.btn, !selected && styles.btnDisabled]}
       >
-        <Text style={styles.btnText}>Iniciar</Text>
+        <Text style={styles.btnText}>{t("onboarding.button")}</Text>
       </Pressable>
     </View>
   );
@@ -178,7 +165,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 18,
   },
-
   bgBlobTop: {
     position: "absolute",
     top: -120,
@@ -197,7 +183,6 @@ const styles = StyleSheet.create({
     borderRadius: 220,
     backgroundColor: "rgba(241,143,1,0.08)",
   },
-
   title: {
     fontSize: 30,
     fontWeight: "900",
@@ -212,10 +197,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#0B2D4D",
   },
-
   list: { gap: 12 },
-
-
   rowShadow: {
     borderRadius: CARD_R,
     backgroundColor: "transparent",
@@ -225,7 +207,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
-
   rowInner: {
     borderRadius: CARD_R,
     backgroundColor: "#FFFFFF",
@@ -236,7 +217,6 @@ const styles = StyleSheet.create({
   rowInnerActive: {
     borderColor: "rgba(11,45,77,0.10)",
   },
-
   rowFill: {
     position: "absolute",
     left: 0,
@@ -244,32 +224,26 @@ const styles = StyleSheet.create({
     bottom: 0,
     opacity: 0.85,
   },
-
   rowContent: {
     paddingVertical: 14,
     paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
   },
-
   iconBox: {
-     width: 48,
+    width: 48,
     height: 48,
     borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
-
   },
-  icon: { fontSize: 20 },
-
   label: {
     flex: 1,
     fontSize: 12.5,
     fontWeight: "900",
     letterSpacing: 0.4,
   },
-
   radio: {
     width: 20,
     height: 20,
@@ -289,7 +263,6 @@ const styles = StyleSheet.create({
     borderRadius: 4.5,
     backgroundColor: "#0B2D4D",
   },
-
   btn: {
     marginTop: 18,
     backgroundColor: "#F18F01",

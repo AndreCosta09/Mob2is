@@ -22,7 +22,7 @@ const C = {
 };
 
 const PRIVACY_POLICY_URL =
-  "http://ajuda.sapo.pt/pt-pt/security/politica-de-privacidade";
+  "https://ajuda.sapo.pt/pt-pt/security/politica-de-privacidade";
 const COOKIE_POLICY_URL = "https://ajuda.sapo.pt/politica-de-cookies-9682";
 const TERMS_PDF_SOURCE = Platform.select({
   android: { uri: "bundle-assets://legal/termos_e_condicoes.pdf" },

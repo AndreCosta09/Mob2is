@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -22,14 +22,36 @@ import CategoryRow from "./search/CategoryRow";
 import PoiCard from "./search/PoiCard";
 
 import { fetchCategories, fetchPoisByCategory, getApiErrorMessage } from "../api/mockApi";
+import { UserContext } from "../context/UserContext";
+import { getAppPalette } from "../utils/accessibility";
 
 import Mob2isLogo from "../assets/logo/logo.svg";
 
 import { useTranslation } from "react-i18next";
 
+function normalizeCategoryName(value = "") {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function categoryKeyFromName(name = "") {
+  const normalized = normalizeCategoryName(name);
+  if (normalized.includes("cultur")) return "culture";
+  if (normalized.includes("saud") || normalized.includes("hospital") || normalized.includes("clin")) return "health";
+  if (normalized.includes("transp") || normalized.includes("autocar") || normalized.includes("comboio")) return "transport";
+  if (normalized.includes("servic") || normalized.includes("public")) return "public_services";
+  if (normalized.includes("turism")) return "tourism";
+  return "other";
+}
 
 export default function SearchScreen({ navigation }) {
   const tabBarH = useBottomTabBarHeight();
+  const { preferences } = useContext(UserContext) ?? {};
+  const reduceMotion = !!preferences?.reduceMotion;
+  const colors = useMemo(() => getAppPalette(!!preferences?.highContrast), [preferences?.highContrast]);
 
   const [categories, setCategories] = useState([]);
   const [selectedCat, setSelectedCat] = useState(null);
@@ -54,31 +76,6 @@ export default function SearchScreen({ navigation }) {
   }));
 }, [categories, t]);
 
-
-
-  const norm = (s = "") =>
-    s
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "") 
-      .toLowerCase()
-      .trim();
-
-  const categoryKeyFromName = (name = "") => {
-    const n = norm(name);
-    if (n.includes("cultur")) return "culture";
-    if (n.includes("saud") || n.includes("hospital") || n.includes("clin")) return "health";
-    if (n.includes("transp") || n.includes("autocar") || n.includes("comboio")) return "transport";
-    if (n.includes("servic") || n.includes("public")) return "public_services";
-    if (n.includes("turism")) return "tourism";
-
-    return "other";
-  };
-
-
-
-
-
-
   useEffect(() => {
     if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
       UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -99,11 +96,11 @@ export default function SearchScreen({ navigation }) {
       } catch (error) {
         setCategories([]);
         setCategoriesErrorMessage(
-          getApiErrorMessage(error, "Nao foi possivel carregar as categorias.")
+          getApiErrorMessage(error, t("api.cannot_load_categories"))
         );
       }
     })();
-  }, []);
+  }, [t]);
 
   const viewKey = useMemo(() => {
     if (selectedPoi) return `detail-${selectedPoi.id}`;
@@ -114,7 +111,9 @@ export default function SearchScreen({ navigation }) {
   const screenAnimStyle = useScreenTransition(viewKey);
 
   const pickCategory = async (cat) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
     setSelectedCat(cat);
     setSelectedPoi(null);
     setPoisErrorMessage("");
@@ -127,7 +126,7 @@ export default function SearchScreen({ navigation }) {
     } catch (error) {
       setPois([]);
       setPoisErrorMessage(
-        getApiErrorMessage(error, "Nao foi possivel carregar os locais desta categoria.")
+        getApiErrorMessage(error, t("api.cannot_load_category_places"))
       );
     } finally {
       setLoadingPois(false);
@@ -135,7 +134,9 @@ export default function SearchScreen({ navigation }) {
   };
 
   const back = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    if (!reduceMotion) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
 
     if (selectedPoi) {
       setSelectedPoi(null);
@@ -150,6 +151,11 @@ export default function SearchScreen({ navigation }) {
     setSelectedPoi(poi);
 
     heroIn.setValue(0);
+    if (reduceMotion) {
+      heroIn.setValue(1);
+      return;
+    }
+
     Animated.spring(heroIn, {
       toValue: 1,
       friction: 8,
@@ -187,7 +193,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
 
   return (
-    <View style={styles.page}>
+    <View style={[styles.page, { backgroundColor: colors.bg }]}>
 
       <View style={styles.greenHeader}>
         <Pressable onPress={back} style={styles.backBtn}>
@@ -284,8 +290,8 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
               <Text style={{ color: C.muted, fontWeight: "800" }}>{t("common.loading")}</Text>
             </View>
           ) : poisErrorMessage ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{poisErrorMessage}</Text>
+            <View style={[styles.errorBox, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}>
+              <Text style={[styles.errorText, { color: colors.dangerText }]}>{poisErrorMessage}</Text>
             </View>
           ) : (
             <FlatList
@@ -307,7 +313,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
 
   return (
-    <View style={styles.page}>
+      <View style={[styles.page, { backgroundColor: colors.bg }]}>
 
       <View pointerEvents="none" style={styles.bgLogo}>
         <Mob2isLogo width={450} height={450} opacity={0.15} />
@@ -315,8 +321,8 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
       <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
         {categoriesErrorMessage ? (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>{categoriesErrorMessage}</Text>
+          <View style={[styles.errorBox, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}>
+            <Text style={[styles.errorText, { color: colors.dangerText }]}>{categoriesErrorMessage}</Text>
           </View>
         ) : null}
 

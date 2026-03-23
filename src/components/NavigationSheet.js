@@ -34,7 +34,6 @@ const COLORS = {
 
 const STATIC_PROFILE_UI = {
   rapida: {
-    label: "Rápido",
     distanceKm: 1.2,
     dots: ["g", "g", "g", "y", "y", "r", "g", "g", "y", "g"],
     slopePct: "23%",
@@ -42,11 +41,8 @@ const STATIC_PROFILE_UI = {
     highPct: "52%",
     mediumPct: "31%",
     lowPct: "17%",
-    lowSlopeText: "Inclinação moderada",
-    lowStepsText: "Relevo irregular",
   },
   equilibrada: {
-    label: "Equilibrada",
     distanceKm: 1.2,
     dots: ["g", "g", "g", "g", "g", "y", "g", "g", "g", "g"],
     slopePct: "1%",
@@ -54,11 +50,8 @@ const STATIC_PROFILE_UI = {
     highPct: "90%",
     mediumPct: "8%",
     lowPct: "2%",
-    lowSlopeText: "Inclinação reduzida",
-    lowStepsText: "Relevo reduzido",
   },
   acessivel: {
-    label: "Acessível",
     distanceKm: 1.2,
     dots: ["g", "g", "g", "g", "y", "y", "g", "g", "g", "g"],
     slopePct: "5%",
@@ -66,14 +59,12 @@ const STATIC_PROFILE_UI = {
     highPct: "83%",
     mediumPct: "26%",
     lowPct: "1%",
-    lowSlopeText: "Inclinação de baixa acessibilidade",
-    lowStepsText: "Relevo com baixa acessibilidade",
   },
 };
 
 function formatKm(value) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "—";
+  if (!Number.isFinite(n)) return "--";
   return `${n.toFixed(1).replace(".", ",")} km`;
 }
 
@@ -116,14 +107,6 @@ function buildAccessibilitySummary(values = []) {
     mediumPct: formatPercent((mediumCount / total) * 100),
     lowPct: formatPercent((lowCount / total) * 100),
   };
-}
-
-function IconPlay({ size = 14, color = "#051F41" }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path d="M9 7.5v9l8-4.5-8-4.5Z" fill={color} />
-    </Svg>
-  );
 }
 
 function IconChevron({ open = false, color = "#98A5B5", size = 16 }) {
@@ -276,9 +259,9 @@ function RouteCard({
 
       {selected && expanded ? (
         <View style={[styles.expandedBox, following && styles.expandedBoxFollowing]}>
-          <LegendRow color={COLORS.green} value={item.highPct} text="Alta acessibilidade" />
-          <LegendRow color={COLORS.yellow} value={item.mediumPct} text="Média acessibilidade" />
-          <LegendRow color={COLORS.red} value={item.lowPct} text="Baixa acessibilidade" />
+          <LegendRow color={COLORS.green} value={item.highPct} text={item.legendHighText} />
+          <LegendRow color={COLORS.yellow} value={item.mediumPct} text={item.legendMediumText} />
+          <LegendRow color={COLORS.red} value={item.lowPct} text={item.legendLowText} />
 
           <View style={styles.expandedMetricRow}>
             <MetricBadge type="slope" value={item.slopePct} />
@@ -298,7 +281,6 @@ function RouteCard({
 export default function NavigationSheet({
   active,
   open,
-  bottomOffset = 94,
   poi,
   etaMin = 0,
   following = false,
@@ -332,7 +314,7 @@ export default function NavigationSheet({
   const availableProfiles = useMemo(() => {
     const arr = Array.isArray(profiles) ? profiles : [];
     const list = arr
-      .map((p) => (typeof p === "string" ? p : p?.perfil))
+      .map((profile) => (typeof profile === "string" ? profile : profile?.perfil))
       .filter(Boolean);
     return new Set(list);
   }, [profiles]);
@@ -340,8 +322,10 @@ export default function NavigationSheet({
   const apiProfilesByKey = useMemo(() => {
     const arr = Array.isArray(profiles) ? profiles : [];
     const map = new Map();
-    arr.forEach((p) => {
-      if (p && typeof p === "object" && p.perfil) map.set(p.perfil, p);
+    arr.forEach((profile) => {
+      if (profile && typeof profile === "object" && profile.perfil) {
+        map.set(profile.perfil, profile);
+      }
     });
     return map;
   }, [profiles]);
@@ -363,10 +347,10 @@ export default function NavigationSheet({
         perfil,
         label:
           perfil === "rapida"
-            ? "Rápido"
+            ? t("navigation.profile_fast")
             : perfil === "equilibrada"
-            ? "Equilibrada"
-            : "Acessível",
+            ? t("navigation.profile_balanced")
+            : t("navigation.profile_accessible"),
         distanceKm:
           Number(api?.total_distance_m) > 0
             ? Number(api.total_distance_m) / 1000
@@ -381,11 +365,26 @@ export default function NavigationSheet({
         highPct: hasDynamicAccessSummary ? accessSummary.highPct : base.highPct,
         mediumPct: hasDynamicAccessSummary ? accessSummary.mediumPct : base.mediumPct,
         lowPct: hasDynamicAccessSummary ? accessSummary.lowPct : base.lowPct,
-        lowSlopeText: Number.isFinite(decliveValue) ? "Declive medio da rota" : base.lowSlopeText,
-        lowStepsText: Number.isFinite(stepsValue) ? "Percurso com escadas" : base.lowStepsText,
+        lowSlopeText: Number.isFinite(decliveValue)
+          ? t("navigation.avg_slope_route")
+          : perfil === "rapida"
+          ? t("navigation.moderate_slope")
+          : perfil === "equilibrada"
+          ? t("navigation.reduced_slope")
+          : t("navigation.low_accessibility_slope"),
+        lowStepsText: Number.isFinite(stepsValue)
+          ? t("navigation.route_with_stairs")
+          : perfil === "rapida"
+          ? t("navigation.uneven_relief")
+          : perfil === "equilibrada"
+          ? t("navigation.reduced_relief")
+          : t("navigation.low_accessibility_relief"),
+        legendHighText: t("navigation.legend_high"),
+        legendMediumText: t("navigation.legend_medium"),
+        legendLowText: t("navigation.legend_low"),
       };
     });
-  }, [apiProfilesByKey, etaMin]);
+  }, [apiProfilesByKey, etaMin, t]);
 
   const selectedItem =
     routeItems.find((item) => item.perfil === selectedPerfil) ||
@@ -393,184 +392,174 @@ export default function NavigationSheet({
     routeItems[0];
 
   const hasApiProfiles = availableProfiles.size > 0;
-
- const sheetBottom = 0;
-const maxSheetHeight = Math.min(height * 0.62, height - 6);
+  const maxSheetHeight = Math.min(height * 0.62, height - 6);
 
   if (!active || !poi) return null;
 
-return (
-  <Modal
-    visible={active && open}
-    transparent
-    animationType="none"
-    statusBarTranslucent
-    onRequestClose={onClose}
-  >
-    <View style={styles.modalRoot} pointerEvents="box-none">
-      <Animated.View
-        style={[
-          styles.sheet,
-          {
-            bottom: 0,
-            maxHeight: maxSheetHeight,
-            transform: [{ translateY: y }],
-          },
-        ]}
-      >
-        <Pressable onPress={onClose} style={styles.handleHit}>
-          <View style={styles.handle} />
-        </Pressable>
+  return (
+    <Modal
+      visible={active && open}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalRoot} pointerEvents="box-none">
+        <Animated.View
+          style={[
+            styles.sheet,
+            {
+              bottom: 0,
+              maxHeight: maxSheetHeight,
+              transform: [{ translateY: y }],
+            },
+          ]}
+        >
+          <Pressable onPress={onClose} style={styles.handleHit}>
+            <View style={styles.handle} />
+          </Pressable>
 
-        <View style={styles.headerRow}>
-          <View style={styles.headerTextWrap}>
-            <View style={styles.kickerRow}>
-              <View style={styles.kickerDot} />
-              <Text style={[styles.kickerText, following && styles.kickerTextFollowing]}>
-                {following ? "A navegar • a seguir a tua localização" : "Destino"}
+          <View style={styles.headerRow}>
+            <View style={styles.headerTextWrap}>
+              <View style={styles.kickerRow}>
+                <View style={styles.kickerDot} />
+                <Text style={[styles.kickerText, following && styles.kickerTextFollowing]}>
+                  {following ? t("navigation.following_hint") : t("navigation.destination")}
+                </Text>
+              </View>
+
+              <Text numberOfLines={2} style={styles.title}>
+                {poi.title}
+              </Text>
+
+              <Text numberOfLines={1} style={styles.subtitleLine}>
+                {poi.routeSummary ?? t("navigation.route_via_default")}
+              </Text>
+
+              <Text numberOfLines={1} style={styles.subtitleLine}>
+                {poi.trafficSummary ?? t("navigation.traffic_default")}
               </Text>
             </View>
 
-            <Text numberOfLines={2} style={styles.title}>
-              {poi.title}
-            </Text>
-
-            <Text numberOfLines={1} style={styles.subtitleLine}>
-              {poi.routeSummary ?? "Via R. de S. Vicente, Av. Cap. Gaspar de Castro"}
-            </Text>
-
-            <Text numberOfLines={1} style={styles.subtitleLine}>
-              {poi.trafficSummary ?? "Melhor rota, Trânsito habitual"}
-            </Text>
+            <Pressable onPress={onClear ?? onClose} hitSlop={10} style={styles.closeBtn}>
+              <Text style={styles.closeText}>×</Text>
+            </Pressable>
           </View>
 
-          <Pressable onPress={onClear ?? onClose} hitSlop={10} style={styles.closeBtn}>
-            <Text style={styles.closeText}>×</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.metaLine}>
-          <Text style={styles.metaEta}>
-            {t("navigation.eta", {
-              min: selectedItem?.estimatedTimeMin || etaMin || 0,
-              defaultValue: `Tempo estimado: ${selectedItem?.estimatedTimeMin || etaMin || 0} min`,
-            })}
-          </Text>
-          <Text style={styles.metaDistance}>{formatKm(selectedItem?.distanceKm)}</Text>
-        </View>
-
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          {!following ? (
-            <>
-              {routeItems.map((item) => {
-                const unavailable = hasApiProfiles && !availableProfiles.has(item.perfil);
-                const selected = item.perfil === selectedItem?.perfil;
-
-                return (
-                  <RouteCard
-                    key={item.perfil}
-                    item={item}
-                    selected={selected}
-                    disabled={unavailable}
-                    expanded={selected && expanded}
-                    onPress={() => {
-                      if (unavailable) return;
-                      onSelectPerfil?.(item.perfil);
-                    }}
-                    onToggleExpand={() => {
-                      if (!selected) {
-                        if (!unavailable) onSelectPerfil?.(item.perfil);
-                        setExpanded(true);
-                        return;
-                      }
-                      setExpanded((prev) => !prev);
-                    }}
-                  />
-                );
+          <View style={styles.metaLine}>
+            <Text style={styles.metaEta}>
+              {t("navigation.eta", {
+                min: selectedItem?.estimatedTimeMin || etaMin || 0,
+                defaultValue: t("navigation.eta_unknown"),
               })}
-            </>
-          ) : (
-            <RouteCard
-              item={selectedItem}
-              selected
-              disabled={false}
-              following
-              expanded={expanded}
-              onPress={() => {}}
-              onToggleExpand={() => setExpanded((prev) => !prev)}
-            />
-          )}
-        </ScrollView>
+            </Text>
+            <Text style={styles.metaDistance}>{formatKm(selectedItem?.distanceKm)}</Text>
+          </View>
 
-        {!following ? (
-          <Pressable style={styles.startBtn} onPress={onStartFollow}>
-            <Text style={styles.startBtnText}>Iniciar Rota</Text>
-          </Pressable>
-        ) : null}
-      </Animated.View>
-    </View>
-  </Modal>
-);
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
+            {!following ? (
+              <>
+                {routeItems.map((item) => {
+                  const unavailable = hasApiProfiles && !availableProfiles.has(item.perfil);
+                  const selected = item.perfil === selectedItem?.perfil;
+
+                  return (
+                    <RouteCard
+                      key={item.perfil}
+                      item={item}
+                      selected={selected}
+                      disabled={unavailable}
+                      expanded={selected && expanded}
+                      onPress={() => {
+                        if (unavailable) return;
+                        onSelectPerfil?.(item.perfil);
+                      }}
+                      onToggleExpand={() => {
+                        if (!selected) {
+                          if (!unavailable) onSelectPerfil?.(item.perfil);
+                          setExpanded(true);
+                          return;
+                        }
+                        setExpanded((prev) => !prev);
+                      }}
+                    />
+                  );
+                })}
+              </>
+            ) : (
+              <RouteCard
+                item={selectedItem}
+                selected
+                disabled={false}
+                following
+                expanded={expanded}
+                onPress={() => {}}
+                onToggleExpand={() => setExpanded((prev) => !prev)}
+              />
+            )}
+          </ScrollView>
+
+          {!following ? (
+            <Pressable style={styles.startBtn} onPress={onStartFollow}>
+              <Text style={styles.startBtnText}>{t("navigation.start_route")}</Text>
+            </Pressable>
+          ) : null}
+        </Animated.View>
+      </View>
+    </Modal>
+  );
 }
 
 const styles = StyleSheet.create({
-
-modalRoot: {
-  flex: 1,
-  justifyContent: "flex-end",
-},
-sheet: {
-  position: "absolute",
-  left: 0,
-  right: 0,
-  backgroundColor: COLORS.bg,
-  borderTopLeftRadius: 26,
-  borderTopRightRadius: 26,
-  paddingTop: 8,
-  paddingHorizontal: 12,
-  paddingBottom: 10,
-  elevation: 30,
-  shadowColor: COLORS.shadow,
-  shadowOpacity: 0.12,
-  shadowRadius: 14,
-  shadowOffset: { width: 0, height: -3 },
-},
-
-
+  modalRoot: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.bg,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingTop: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    elevation: 30,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: -3 },
+  },
   handleHit: {
     alignSelf: "center",
     paddingVertical: 5,
     paddingHorizontal: 28,
   },
-
   handle: {
     width: 42,
     height: 5,
     borderRadius: 999,
     backgroundColor: "#C7CFD8",
   },
-
   headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
     marginTop: 2,
   },
-
   headerTextWrap: {
     flex: 1,
     paddingRight: 8,
   },
-
   kickerRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 3,
   },
-
   kickerDot: {
     width: 8,
     height: 8,
@@ -578,30 +567,25 @@ sheet: {
     backgroundColor: COLORS.green,
     marginRight: 6,
   },
-
   kickerText: {
     fontSize: 12,
     fontWeight: "700",
     color: COLORS.textMuted,
   },
-
   kickerTextFollowing: {
     color: COLORS.green,
   },
-
   title: {
     fontSize: 15,
     lineHeight: 20,
     fontWeight: "900",
     color: COLORS.navy,
   },
-
   subtitleLine: {
     marginTop: 1,
     fontSize: 11,
     color: "#4F5661",
   },
-
   closeBtn: {
     width: 28,
     height: 28,
@@ -609,14 +593,12 @@ sheet: {
     justifyContent: "center",
     marginTop: -2,
   },
-
   closeText: {
     fontSize: 26,
     lineHeight: 26,
     color: "#98A4B4",
     fontWeight: "300",
   },
-
   metaLine: {
     marginTop: 8,
     marginBottom: 8,
@@ -624,96 +606,78 @@ sheet: {
     justifyContent: "space-between",
     alignItems: "center",
   },
-
   metaEta: {
     fontSize: 11,
     fontWeight: "800",
     color: "#A2ADB9",
   },
-
   metaDistance: {
     fontSize: 11,
     fontWeight: "800",
     color: "#A2ADB9",
   },
-
   scrollContent: {
     paddingBottom: 4,
   },
-
   routeCardWrap: {
     marginBottom: 10,
   },
-
-routeCard: {
-  minHeight: 84,
-  borderRadius: 22,
-  paddingHorizontal: 12,
-  paddingVertical: 9,
-  flexDirection: "row",
-  alignItems: "center",
-  shadowColor: COLORS.shadow,
-  shadowOpacity: 0.07,
-  shadowRadius: 7,
-  shadowOffset: { width: 0, height: 3 },
-  elevation: 3,
-},
-
+  routeCard: {
+    minHeight: 84,
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 0.07,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
   routeCardSelected: {
     backgroundColor: COLORS.card,
   },
-
   routeCardUnselected: {
     backgroundColor: "#F1F4F7",
   },
-
   routeCardDisabled: {
     opacity: 0.62,
   },
-
   routeLeft: {
     width: 82,
     justifyContent: "center",
   },
-
   routeTitle: {
     fontSize: 12,
     fontWeight: "400",
   },
-
   routeKm: {
     marginTop: 3,
     fontSize: 12,
     fontWeight: "400",
   },
-
   routeCenter: {
     flex: 1,
     paddingRight: 6,
   },
-
   dotsRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     width: "100%",
   },
-
   routeDot: {
     width: 11,
     height: 11,
     borderRadius: 5.5,
   },
-
-
-
   routeMetrics: {
     marginTop: 7,
     flexDirection: "row",
     gap: 6,
     alignItems: "center",
   },
-
   metricBadge: {
     height: 26,
     borderRadius: 7,
@@ -721,17 +685,14 @@ routeCard: {
     flexDirection: "row",
     backgroundColor: COLORS.badgeGray,
   },
-
   metricBadgeMuted: {
     opacity: 0.7,
   },
-
   metricBadgeIconWrap: {
     width: 62,
     alignItems: "center",
     justifyContent: "center",
   },
-
   metricBadgeValueWrap: {
     minWidth: 42,
     alignItems: "center",
@@ -739,19 +700,17 @@ routeCard: {
     paddingHorizontal: 6,
     backgroundColor: COLORS.badgeGray,
   },
-    metricBadgeValue: {
-      color: COLORS.white,
-      fontSize: 10,
-      fontWeight: "800",
-    },
-
+  metricBadgeValue: {
+    color: COLORS.white,
+    fontSize: 10,
+    fontWeight: "800",
+  },
   chevronBtn: {
     width: 30,
     marginLeft: 10,
     alignItems: "center",
     justifyContent: "center",
   },
-
   expandedBox: {
     marginTop: 6,
     marginHorizontal: 6,
@@ -765,63 +724,54 @@ routeCard: {
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
   },
-
   expandedBoxFollowing: {
     marginHorizontal: 0,
   },
-
   legendRow: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 8,
   },
-
   legendDot: {
     width: 9,
     height: 9,
     borderRadius: 4.5,
     marginRight: 8,
   },
-
   legendValue: {
     width: 38,
     fontSize: 12,
     fontWeight: "900",
   },
-
   legendText: {
     fontSize: 12,
     fontWeight: "900",
   },
-
   expandedMetricRow: {
     marginTop: 5,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
-
   expandedMetricText: {
     flex: 1,
     fontSize: 11,
     color: "#6F7C8B",
     fontWeight: "700",
   },
-
- startBtn: {
-  marginTop: 6,
-  height: 44,
-  borderRadius: 16,
-  backgroundColor: COLORS.orange,
-  alignItems: "center",
-  justifyContent: "center",
-  elevation: 6,
-  shadowColor: COLORS.shadow,
-  shadowOpacity: 0.12,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 5 },
-},
-
+  startBtn: {
+    marginTop: 6,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: COLORS.orange,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
   startBtnText: {
     color: COLORS.white,
     fontSize: 15,

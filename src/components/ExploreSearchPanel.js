@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import MicrofoneIcon from "../assets/microfone.svg";
 import SearchIcon from "../assets/search.svg";
 import { getApiErrorMessage, getPOIs, searchPois } from "../api/mockApi";
+import { getAppPalette, getModalAnimationType } from "../utils/accessibility";
+import { haversineMeters } from "../utils/map/geo";
 
 const EXTRA_GAP = 56;
 
@@ -85,7 +87,13 @@ function bestPoiMatch(spoken, pois) {
   return best ? { poi: best, score: bestScore } : null;
 }
 
-export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination }) {
+export default function ExploreSearchPanel({
+  bottomOffset = 0,
+  onPickDestination,
+  reduceMotion = false,
+  highContrast = false,
+  userCoord = null,
+}) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
@@ -95,24 +103,49 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
   const finishVoiceWithTextRef = useRef(null);
 
   const { i18n, t } = useTranslation();
+  const colors = getAppPalette(highContrast);
 
-  const load = async (query) => {
-    try {
-      const response = await searchPois(query);
-      setResults(response);
-      setSearchErrorMessage("");
-    } catch (error) {
-      setResults([]);
-      setSearchErrorMessage(
-        getApiErrorMessage(error, "Nao foi possivel pesquisar os destinos.")
-      );
-    }
-  };
+  const enrichResultsWithDistance = useCallback(
+    (items = []) => {
+      return [...items]
+        .map((item) => {
+          const distanceKm =
+            Array.isArray(userCoord) && Array.isArray(item?.coords)
+              ? haversineMeters(userCoord, item.coords) / 1000
+              : null;
+
+          return {
+            ...item,
+            distanceKm: Number.isFinite(distanceKm) ? distanceKm : null,
+          };
+        })
+        .sort((a, b) => {
+          const distA = Number.isFinite(a.distanceKm) ? a.distanceKm : Infinity;
+          const distB = Number.isFinite(b.distanceKm) ? b.distanceKm : Infinity;
+          return distA - distB;
+        });
+    },
+    [userCoord]
+  );
+
+  const load = useCallback(
+    async (query) => {
+      try {
+        const response = await searchPois(query);
+        setResults(enrichResultsWithDistance(response));
+        setSearchErrorMessage("");
+      } catch (error) {
+        setResults([]);
+        setSearchErrorMessage(getApiErrorMessage(error, t("api.cannot_search_destinations")));
+      }
+    },
+    [enrichResultsWithDistance, t]
+  );
 
   useEffect(() => {
     if (!open) return;
     load(q);
-  }, [open, q]);
+  }, [load, open, q, userCoord]);
 
   async function stopVoice() {
     try {
@@ -130,7 +163,7 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
       const match = bestPoiMatch(text, pois);
 
       if (match?.poi && match.score >= 0.52) {
-        pick(match.poi);
+        pick(enrichResultsWithDistance([match.poi])[0]);
         return;
       }
 
@@ -138,9 +171,7 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
       setOpen(true);
       await load(text);
     } catch (error) {
-      setSearchErrorMessage(
-        getApiErrorMessage(error, "Nao foi possivel carregar os destinos.")
-      );
+      setSearchErrorMessage(getApiErrorMessage(error, t("api.cannot_load_destinations")));
       setQ(text);
       setOpen(true);
       await load(text);
@@ -207,33 +238,51 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
   return (
     <>
       <View style={[styles.panel, { bottom: bottomOffset + EXTRA_GAP }]}>
-        <View style={styles.searchRow}>
+        <View
+          style={[
+            styles.searchRow,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <Pressable style={styles.searchTapArea} onPress={openModal}>
-            <View style={styles.leftCircle}>
-              <SearchIcon width={18} height={18} color="#6B7A88" />
+            <View style={[styles.leftCircle, { backgroundColor: colors.surfaceAlt }]}>
+              <SearchIcon width={18} height={18} color={colors.muted} />
             </View>
-            <Text style={styles.title}>{t("exploreSearch.where_to")}</Text>
+            <Text style={[styles.title, { color: colors.muted }]}>{t("exploreSearch.where_to")}</Text>
           </Pressable>
 
           <Pressable
-            style={styles.rightCircle}
+            style={[styles.rightCircle, { backgroundColor: colors.accent }]}
             onPress={startVoice}
             accessibilityLabel={t("a11y.voice_search")}
           >
-            <MicrofoneIcon width={14} height={18} color="#FFFFFF" />
+            <MicrofoneIcon width={14} height={18} color={highContrast ? colors.accentText : "#FFFFFF"} />
           </Pressable>
         </View>
       </View>
 
-      <Modal visible={listening} transparent animationType="fade">
-        <View style={styles.listenBackdrop}>
-          <View style={styles.listenCard}>
-            <Text style={styles.listenTitle}>{t("exploreSearch.listening_title")}</Text>
-            <Text style={styles.listenSub} numberOfLines={2}>
+      <Modal
+        visible={listening}
+        transparent
+        animationType={getModalAnimationType(reduceMotion, "fade")}
+      >
+        <View style={[styles.listenBackdrop, { backgroundColor: colors.overlay }]}>
+          <View style={[styles.listenCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.listenTitle, { color: colors.text }]}>{t("exploreSearch.listening_title")}</Text>
+            <Text style={[styles.listenSub, { color: colors.muted }]} numberOfLines={2}>
               {heardText ? `"${heardText}"` : t("exploreSearch.listening_hint")}
             </Text>
 
-            <Pressable style={styles.listenCancel} onPress={stopVoice}>
+            <Pressable
+              style={[
+                styles.listenCancel,
+                { backgroundColor: highContrast ? colors.text : "#051F41" },
+              ]}
+              onPress={stopVoice}
+            >
               <Text style={styles.listenCancelText}>{t("common.cancel")}</Text>
             </Pressable>
           </View>
@@ -243,32 +292,48 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
       <Modal
         visible={open}
         transparent
-        animationType="fade"
+        animationType={getModalAnimationType(reduceMotion, "fade")}
         onRequestClose={() => setOpen(false)}
       >
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => setOpen(false)} />
 
-        <View style={[styles.sheet, { bottom: bottomOffset - 8 }]}>
+        <View
+          style={[
+            styles.sheet,
+            {
+              bottom: bottomOffset - 8,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
           <View style={styles.sheetTop}>
             <Pressable onPress={() => setOpen(false)} hitSlop={10}>
-              <Text style={styles.backChevron}>{"<"}</Text>
+              <Text style={[styles.backChevron, { color: colors.muted }]}>{"<"}</Text>
             </Pressable>
 
             <TextInput
               value={q}
               onChangeText={setQ}
               placeholder={t("exploreSearch.placeholder")}
-              placeholderTextColor="#9AA3AD"
-              style={styles.input}
+              placeholderTextColor={colors.muted}
+              style={[
+                styles.input,
+                {
+                  backgroundColor: colors.surfaceAlt,
+                  color: colors.text,
+                  borderColor: colors.border,
+                },
+              ]}
               autoFocus
             />
 
             <Pressable
-              style={styles.pencilCircle}
+              style={[styles.pencilCircle, { backgroundColor: colors.accent }]}
               onPress={startVoice}
               accessibilityLabel={t("a11y.voice_search")}
             >
-              <MicrofoneIcon width={14} height={18} color="#FFFFFF" />
+              <MicrofoneIcon width={14} height={18} color={highContrast ? colors.accentText : "#FFFFFF"} />
             </Pressable>
           </View>
 
@@ -278,8 +343,16 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               searchErrorMessage ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>{searchErrorMessage}</Text>
+                <View
+                  style={[
+                    styles.errorBox,
+                    {
+                      backgroundColor: colors.dangerBg,
+                      borderColor: colors.dangerBorder,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.errorText, { color: colors.dangerText }]}>{searchErrorMessage}</Text>
                 </View>
               ) : null
             }
@@ -287,19 +360,44 @@ export default function ExploreSearchPanel({ bottomOffset = 0, onPickDestination
             renderItem={({ item, index }) => (
               <Pressable
                 onPress={() => pick(item)}
-                style={[styles.rowItem, index === 0 && styles.rowActive]}
+                style={[
+                  styles.rowItem,
+                  index === 0 && {
+                    backgroundColor: colors.accent,
+                  },
+                ]}
               >
-                <View style={[styles.dot, index === 0 && styles.dotActive]} />
+                <View
+                  style={[
+                    styles.dot,
+                    { backgroundColor: highContrast ? colors.border : "#C9D1DA" },
+                    index === 0 && styles.dotActive,
+                  ]}
+                />
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.itemTitle, index === 0 && styles.itemTitleActive]}>
+                  <Text
+                    style={[
+                      styles.itemTitle,
+                      { color: colors.text },
+                      index === 0 && styles.itemTitleActive,
+                    ]}
+                  >
                     {item.title}
                   </Text>
-                  <Text style={[styles.itemSub, index === 0 && styles.itemSubActive]}>
+                  <Text
+                    style={[
+                      styles.itemSub,
+                      { color: colors.muted },
+                      index === 0 && styles.itemSubActive,
+                    ]}
+                  >
                     {t("common.city_viana")}
                   </Text>
                 </View>
-                <Text style={[styles.km, index === 0 && styles.kmActive]}>
-                  {(1.7 + index * 0.3).toFixed(1).replace(".", ",")} km
+                <Text style={[styles.km, { color: colors.text }, index === 0 && styles.kmActive]}>
+                  {Number.isFinite(item.distanceKm)
+                    ? `${item.distanceKm.toFixed(1).replace(".", ",")} km`
+                    : `-- ${t("common.km")}`}
                 </Text>
               </Pressable>
             )}
@@ -384,12 +482,11 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    backgroundColor: "#F3F5F7",
     borderRadius: 18,
+    borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontWeight: "800",
-    color: "#0B2D4D",
   },
   pencilCircle: {
     width: 34,
@@ -467,8 +564,8 @@ const styles = StyleSheet.create({
   },
   listenCard: {
     width: "100%",
-    backgroundColor: "#FFFFFF",
     borderRadius: 20,
+    borderWidth: 1,
     padding: 16,
     elevation: 22,
   },

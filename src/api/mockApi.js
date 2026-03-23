@@ -1,4 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import i18n from "../i18n";
+import { devLog, devWarn } from "../utils/logger";
 
 export const VIANA_COORDS = [-8.8273, 41.6946];
 
@@ -16,13 +18,13 @@ const CACHE_KEYS = {
 
 const ROUTE_V2_POST_TIMEOUT_MS = 20000;
 const ROUTE_V2_POLL_TIMEOUT_MS = 120000;
-const API_USER_MESSAGES = {
-  "/getPOIs": "Nao foi possivel carregar os pontos de interesse.",
-  "/getTaxis": "Nao foi possivel carregar os taxis.",
-  "/getClassifiedStreets": "Nao foi possivel carregar a acessibilidade das ruas.",
-  "/calculateRoute": "Nao foi possivel calcular a rota.",
-  "/calculateRouteMultiObjective": "Nao foi possivel calcular a rota.",
-  "/calculateRouteMultiObjectiveV2": "Nao foi possivel calcular a rota.",
+const API_USER_MESSAGE_KEYS = {
+  "/getPOIs": "api.cannot_load_pois",
+  "/getTaxis": "api.server_error",
+  "/getClassifiedStreets": "api.cannot_load_street_accessibility",
+  "/calculateRoute": "api.cannot_calculate_route",
+  "/calculateRouteMultiObjective": "api.cannot_calculate_route",
+  "/calculateRouteMultiObjectiveV2": "api.cannot_calculate_route",
 };
 
 async function readCache(key) {
@@ -116,15 +118,26 @@ function isV2BadGatewayError(err) {
   return msg.includes("HTTP 502 em /calculateRouteMultiObjectiveV2");
 }
 
-function getApiDefaultUserMessage(path) {
-  if (!path) return "Ocorreu um erro ao comunicar com o servidor.";
+function normalizeSearchText(value) {
+  return (value ?? "")
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-  if (API_USER_MESSAGES[path]) return API_USER_MESSAGES[path];
+function getApiDefaultUserMessage(path) {
+  if (!path) return i18n.t("api.server_error");
+
+  if (API_USER_MESSAGE_KEYS[path]) return i18n.t(API_USER_MESSAGE_KEYS[path]);
   if (path.startsWith("/calculateRouteMultiObjectiveV2/")) {
-    return API_USER_MESSAGES["/calculateRouteMultiObjectiveV2"];
+    return i18n.t(API_USER_MESSAGE_KEYS["/calculateRouteMultiObjectiveV2"]);
   }
 
-  return "Ocorreu um erro ao comunicar com o servidor.";
+  return i18n.t("api.server_error");
 }
 
 function createApiError(path, cause, fallbackMessage) {
@@ -140,7 +153,7 @@ function normalizeApiError(path, error, fallbackMessage) {
   return createApiError(path, error, fallbackMessage);
 }
 
-export function getApiErrorMessage(error, fallback = "Ocorreu um erro ao comunicar com o servidor.") {
+export function getApiErrorMessage(error, fallback = i18n.t("api.server_error")) {
   return error?.userMessage || fallback;
 }
 
@@ -226,8 +239,8 @@ function mapPoiFromApi(item) {
   const g = item?.geometry ?? {};
 
   const objectId = a.OBJECTID ?? a.objectid ?? a.Ponto ?? `${Math.random()}`;
-  const title = a.DESIGNACAO ?? a.NOME ?? "Sem nome";
-  const categoryName = a.CATEGORIA ?? "Outros";
+  const title = a.DESIGNACAO ?? a.NOME ?? i18n.t("api.unnamed_poi");
+  const categoryName = a.CATEGORIA ?? i18n.t("api.uncategorized");
   const categoryId = slugify(categoryName);
 
   const lng = g.x != null ? Number(g.x) : null;
@@ -243,7 +256,7 @@ function mapPoiFromApi(item) {
     categoryName,
     coords,
     graphPointId: a.Ponto ?? null,
-    description: a.DESCRICAO ?? "Sem descrição disponível.",
+    description: a.DESCRICAO ?? i18n.t("api.no_description"),
     phone: normalizePhone(a.TELEFONE),
     image,
     rating: pseudoRating(objectId),
@@ -397,7 +410,7 @@ async function pollCalculateRouteMultiObjectiveV2(
       timeoutMs: 20000,
     });
 
-    console.log("[Mob2is] V2 poll", {
+    devLog("[Mob2is] V2 poll", {
       attempt,
       elapsedMs: Date.now() - startedAt,
       status: poll?.status,
@@ -456,9 +469,9 @@ export async function calculateRouteMultiObjective({
 
   const payload = cleanRoutePayloadPreserveNulls(rawPayload);
 
-  console.log("[Mob2is] V2 raw payload object", rawPayload);
-  console.log("[Mob2is] V2 cleaned payload object", payload);
-  console.log("[Mob2is] V2 cleaned payload JSON", JSON.stringify(payload, null, 2));
+  devLog("[Mob2is] V2 raw payload object", rawPayload);
+  devLog("[Mob2is] V2 cleaned payload object", payload);
+  devLog("[Mob2is] V2 cleaned payload JSON", JSON.stringify(payload, null, 2));
 
   let launch;
   try {
@@ -467,13 +480,13 @@ export async function calculateRouteMultiObjective({
     });
   } catch (e) {
     if (isV2BadGatewayError(e)) {
-      console.warn("[Mob2is] V2 devolveu 502. A usar fallback para /calculateRouteMultiObjective.");
+      devWarn("[Mob2is] V2 devolveu 502. A usar fallback para /calculateRouteMultiObjective.");
       return calculateRouteMultiObjectiveLegacy(payload);
     }
     throw e;
   }
 
-  console.log("[Mob2is] V2 POST response", launch);
+  devLog("[Mob2is] V2 POST response", launch);
 
   if (launch?.status === "done") {
     return normalizeMultiObjectiveResultFromV2(launch?.resultado);
@@ -557,7 +570,27 @@ export async function fetchPoisByCategory(categoryId) {
 
 export async function searchPois(q) {
   const pois = await getPOIs();
-  const query = (q ?? "").trim().toLowerCase();
+  const query = normalizeSearchText(q);
   if (!query) return pois;
-  return pois.filter((p) => (p.title ?? "").toLowerCase().includes(query));
+
+  return pois
+    .map((poi) => {
+      const title = normalizeSearchText(poi.title);
+      const category = normalizeSearchText(poi.categoryName);
+      const description = normalizeSearchText(poi.description);
+      const haystack = `${title} ${category} ${description}`.trim();
+
+      let score = 0;
+      if (title === query) score += 120;
+      if (title.startsWith(query)) score += 80;
+      if (title.includes(query)) score += 50;
+      if (category.includes(query)) score += 25;
+      if (description.includes(query)) score += 10;
+      if (haystack.includes(query)) score += 5;
+
+      return { poi, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.poi.title).localeCompare(String(b.poi.title)))
+    .map((entry) => entry.poi);
 }

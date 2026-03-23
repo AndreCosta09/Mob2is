@@ -1,18 +1,30 @@
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { Animated, Easing } from "react-native";
+import { UserContext } from "../../context/UserContext";
+import { getMotionDuration } from "../../utils/accessibility";
 
 export default function useScreenTransition(key) {
   const anim = useRef(new Animated.Value(1)).current;
+  const { preferences } = useContext(UserContext) ?? {};
+  const reduceMotion = !!preferences?.reduceMotion;
 
   useEffect(() => {
+    if (reduceMotion) {
+      anim.setValue(1);
+      return;
+    }
+
     anim.setValue(0);
-    Animated.timing(anim, {
+    const transition = Animated.timing(anim, {
       toValue: 1,
-      duration: 320,
+      duration: getMotionDuration(reduceMotion, 320),
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
-  }, [key, anim]);
+    });
+
+    transition.start();
+    return () => transition.stop();
+  }, [key, anim, reduceMotion]);
 
   return {
     opacity: anim,

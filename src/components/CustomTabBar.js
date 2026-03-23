@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useContext, useEffect, useMemo, useRef } from "react";
 import {
   Animated,
   Image,
@@ -12,6 +12,8 @@ import Svg, { Defs, Mask, Path, Rect } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CategoriasIcon from "../assets/categorias.svg";
 import MaisIcon from "../assets/mais.svg";
+import { UserContext } from "../context/UserContext";
+import { getAppPalette, getMotionDuration } from "../utils/accessibility";
 
 const EMPTY_ROUTES = [];
 
@@ -26,11 +28,9 @@ const NOTCH_W = 100;
 const NOTCH_DEPTH = 30;
 const BALL_SIZE = 58;
 const BALL_GAP = 5;
-
-const ACTIVE_COLOR = "#F09C1F";
-const INACTIVE_TINT = "#F09C1F";
-const BAR_BG = "#FFFFFF";
-const BAR_STROKE = "rgba(102,112,128,0.25)";
+const TAB_ICON_SIZE = 22;
+const ACTIVE_TAB_ICON_SIZE = 22;
+const TOP_MENU_MARGIN = 8;
 
 const CUT_DEPTH = Math.min(NOTCH_DEPTH, BALL_SIZE / 2 - BALL_GAP + 10);
 
@@ -63,26 +63,42 @@ function buildDentPath(cx, barW, depth) {
 }
 
 function TabIcon({ routeName, color, size }) {
+  const iconProps = {
+    width: size,
+    height: size,
+    color,
+  };
+
   if (routeName === "Pesquisar") {
-    return <CategoriasIcon width={size} height={size} color={color} />;
+    return (
+      <View style={[styles.iconBox, { width: size, height: size }]}>
+        <CategoriasIcon {...iconProps} />
+      </View>
+    );
   }
 
   if (routeName === "Mais") {
-    return <MaisIcon width={size} height={size} color={color} />;
+    return (
+      <View style={[styles.iconBox, { width: size, height: size }]}>
+        <MaisIcon {...iconProps} />
+      </View>
+    );
   }
 
   return (
-    <Image
-      source={ICONS[routeName]}
-      style={[
-        styles.iconImg,
-        {
-          width: size,
-          height: size,
-          tintColor: color,
-        },
-      ]}
-    />
+    <View style={[styles.iconBox, { width: size, height: size }]}>
+      <Image
+        source={ICONS[routeName]}
+        style={[
+          styles.iconImg,
+          {
+            width: size,
+            height: size,
+            tintColor: color,
+          },
+        ]}
+      />
+    </View>
   );
 }
 
@@ -92,6 +108,9 @@ export default function CustomTabBar(props) {
   const activeIndex = state?.index ?? 0;
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { preferences } = useContext(UserContext) ?? {};
+  const reduceMotion = !!preferences?.reduceMotion;
+  const colors = useMemo(() => getAppPalette(!!preferences?.highContrast), [preferences?.highContrast]);
 
   const barW = Math.max(260, width - SIDE_PAD * 2);
   const tabW = routes.length ? barW / routes.length : barW;
@@ -122,7 +141,13 @@ export default function CustomTabBar(props) {
   useEffect(() => {
     const to = centers[activeIndex] ?? centers[0];
 
-    Animated.parallel([
+    if (reduceMotion) {
+      centerX.setValue(to);
+      bounceY.setValue(0);
+      return;
+    }
+
+    const anim = Animated.parallel([
       Animated.spring(centerX, {
         toValue: to,
         useNativeDriver: true,
@@ -133,17 +158,20 @@ export default function CustomTabBar(props) {
       Animated.sequence([
         Animated.timing(bounceY, {
           toValue: -2,
-          duration: 120,
+          duration: getMotionDuration(reduceMotion, 120),
           useNativeDriver: true,
         }),
         Animated.timing(bounceY, {
           toValue: 0,
-          duration: 160,
+          duration: getMotionDuration(reduceMotion, 160),
           useNativeDriver: true,
         }),
       ]),
-    ]).start();
-  }, [activeIndex, bounceY, centerX, centers]);
+    ]);
+
+    anim.start();
+    return () => anim.stop();
+  }, [activeIndex, bounceY, centerX, centers, reduceMotion]);
 
   const ballTranslateX = Animated.subtract(centerX, BALL_SIZE / 2);
   const ballTop = -BALL_SIZE / 2 - BALL_GAP;
@@ -152,7 +180,7 @@ export default function CustomTabBar(props) {
   if (!routes.length) return null;
 
   return (
-    <View style={[styles.wrap, { paddingBottom: insets.bottom }]}>
+    <View style={[styles.wrap, { paddingTop: TOP_MENU_MARGIN, paddingBottom: insets.bottom }]}>
       <View style={[styles.pillShadow, { width: barW, borderRadius: CORNER_R }]}>
         <Svg width={barW} height={BAR_HEIGHT} style={styles.svg}>
           <Defs>
@@ -171,7 +199,7 @@ export default function CustomTabBar(props) {
                 height={BAR_HEIGHT}
                 rx={CORNER_R}
                 ry={CORNER_R}
-                fill="rgb(255, 255, 255)"
+                fill={colors.surface}
               />
               <Path ref={dentMaskRef} d={initialCutD} fill="black" />
             </Mask>
@@ -184,8 +212,8 @@ export default function CustomTabBar(props) {
             height={BAR_HEIGHT}
             rx={CORNER_R}
             ry={CORNER_R}
-            fill={BAR_BG}
-            stroke={BAR_STROKE}
+            fill={colors.surface}
+            stroke={colors.border}
             mask="url(#barMask)"
           />
         </Svg>
@@ -200,8 +228,16 @@ export default function CustomTabBar(props) {
             },
           ]}
         >
-          <View style={styles.ball}>
-            <TabIcon routeName={activeRouteName} color="#0B2D4D" size={25} />
+          <View
+            style={[
+              styles.ball,
+              {
+                backgroundColor: colors.accent,
+                shadowOpacity: reduceMotion ? 0.08 : 0.14,
+              },
+            ]}
+          >
+            <TabIcon routeName={activeRouteName} color={colors.accentText} size={ACTIVE_TAB_ICON_SIZE} />
           </View>
         </Animated.View>
 
@@ -225,9 +261,20 @@ export default function CustomTabBar(props) {
             return (
               <Pressable key={route.key} onPress={onPress} style={styles.tab}>
                 <View style={isFocused && styles.iconHidden}>
-                  <TabIcon routeName={route.name} color={INACTIVE_TINT} size={30} />
+                  <TabIcon routeName={route.name} color={colors.accent} size={TAB_ICON_SIZE} />
                 </View>
-                <Text style={[styles.label, isFocused && styles.labelActive]}>{label}</Text>
+                <Text
+                  style={[
+                    styles.label,
+                    { color: colors.iconInactive },
+                    isFocused && {
+                      color: colors.accent,
+                      fontWeight: "900",
+                    },
+                  ]}
+                >
+                  {label}
+                </Text>
               </Pressable>
             );
           })}
@@ -270,20 +317,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingBottom: 10,
   },
+  iconBox: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
   iconImg: {
     resizeMode: "contain",
-    marginBottom: 6,
   },
   iconHidden: {
     opacity: 0,
   },
   label: {
     fontSize: 12,
-    color: "#9AA3AD",
-  },
-  labelActive: {
-    color: ACTIVE_COLOR,
-    fontWeight: "900",
   },
   ballWrap: {
     position: "absolute",
@@ -294,7 +340,6 @@ const styles = StyleSheet.create({
     width: BALL_SIZE,
     height: BALL_SIZE,
     borderRadius: BALL_SIZE / 2,
-    backgroundColor: ACTIVE_COLOR,
     alignItems: "center",
     justifyContent: "center",
     shadowColor: "#000",

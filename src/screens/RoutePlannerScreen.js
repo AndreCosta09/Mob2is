@@ -9,6 +9,8 @@ import {
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
+
 import { UserContext } from "../context/UserContext";
 import {
   CONDITIONS,
@@ -26,11 +28,13 @@ const C = {
 };
 
 function RoutePreferenceRow({ item, selected, onPress }) {
+  const { t } = useTranslation();
+
   return (
     <Pressable onPress={onPress} style={styles.optionRow}>
       <View style={styles.rowTextWrap}>
-        <Text style={styles.optionText}>{item.label}</Text>
-        <Text style={styles.optionSub}>{item.subtitle}</Text>
+        <Text style={styles.optionText}>{t(`routePlanner.preferences.${item.key}.label`)}</Text>
+        <Text style={styles.optionSub}>{t(`routePlanner.preferences.${item.key}.subtitle`)}</Text>
       </View>
 
       <View style={[styles.radio, selected && styles.radioActive]}>
@@ -42,6 +46,7 @@ function RoutePreferenceRow({ item, selected, onPress }) {
 
 function ConditionSummaryRow({ item }) {
   const Icon = item.Icon;
+  const { t } = useTranslation();
 
   return (
     <View style={styles.row}>
@@ -50,8 +55,8 @@ function ConditionSummaryRow({ item }) {
       </View>
 
       <View style={styles.rowTextWrap}>
-        <Text style={styles.rowTitle}>Condicao atual</Text>
-        <Text style={styles.rowSub}>{item.label}</Text>
+        <Text style={styles.rowTitle}>{t("routePlanner.current_condition")}</Text>
+        <Text style={styles.rowSub}>{t(`onboarding.conditions.${item.key}`)}</Text>
       </View>
     </View>
   );
@@ -59,6 +64,7 @@ function ConditionSummaryRow({ item }) {
 
 function ConditionOptionRow({ item, selected, onPress }) {
   const Icon = item.Icon;
+  const { t } = useTranslation();
 
   return (
     <Pressable onPress={onPress} style={styles.optionRow}>
@@ -66,7 +72,7 @@ function ConditionOptionRow({ item, selected, onPress }) {
         <Icon width={26} height={26} />
       </View>
 
-      <Text style={styles.optionText}>{item.label}</Text>
+      <Text style={styles.optionText}>{t(`onboarding.conditions.${item.key}`)}</Text>
 
       <View style={[styles.radio, selected && styles.radioActive]}>
         {selected ? <View style={styles.radioDot} /> : null}
@@ -78,6 +84,7 @@ function ConditionOptionRow({ item, selected, onPress }) {
 export default function RoutePlannerScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const tabBarH = useBottomTabBarHeight();
+  const { t } = useTranslation();
   const {
     condition,
     routePreference,
@@ -91,12 +98,12 @@ export default function RoutePlannerScreen({ navigation }) {
     if (!nextCondition || nextCondition === condition) return;
 
     Alert.alert(
-      "Deseja alterar a sua condicao?",
-      "Esta condicao passara a ser usada por defeito nos proximos calculos de rota.",
+      t("routePlanner.confirm_condition_title"),
+      t("routePlanner.confirm_condition_message"),
       [
-        { text: "Cancelar", style: "cancel" },
+        { text: t("routePlanner.confirm_condition_cancel"), style: "cancel" },
         {
-          text: "Alterar",
+          text: t("routePlanner.confirm_condition_confirm"),
           onPress: () => saveCondition?.(nextCondition),
         },
       ]
@@ -109,7 +116,7 @@ export default function RoutePlannerScreen({ navigation }) {
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backTxt}>{"<"}</Text>
         </Pressable>
-        <Text style={styles.title}>Programar Percurso</Text>
+        <Text style={styles.title}>{t("routePlanner.title")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -123,14 +130,14 @@ export default function RoutePlannerScreen({ navigation }) {
         ]}
       >
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Condicao</Text>
+          <Text style={styles.sectionTitle}>{t("routePlanner.current_condition")}</Text>
           <ConditionSummaryRow item={selectedCondition} />
         </View>
 
         <View style={styles.blockSpacer} />
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Alterar condicao</Text>
+          <Text style={styles.sectionTitle}>{t("routePlanner.change_condition")}</Text>
 
           {CONDITIONS.map((item, index) => (
             <View key={item.key}>
@@ -147,14 +154,12 @@ export default function RoutePlannerScreen({ navigation }) {
         <View style={styles.blockSpacer} />
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Preferencia de rota</Text>
+          <Text style={styles.sectionTitle}>{t("routePlanner.route_preference")}</Text>
 
           <View style={styles.row}>
             <View style={styles.rowTextWrap}>
-              <Text style={styles.rowTitle}>Rota pre-selecionada</Text>
-              <Text style={styles.rowSub}>
-                Ao calcular a rota, esta opcao fica escolhida por defeito.
-              </Text>
+              <Text style={styles.rowTitle}>{t("routePlanner.selected_route_label")}</Text>
+              <Text style={styles.rowSub}>{t("routePlanner.selected_route_description")}</Text>
             </View>
           </View>
 

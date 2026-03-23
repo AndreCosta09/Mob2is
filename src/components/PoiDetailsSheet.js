@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { useTranslation } from "react-i18next";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -20,10 +21,11 @@ export default function PoiDetailsSheet({
   onClose,
   onStartNavigation,
 }) {
+  const { t } = useTranslation();
   const { height: screenHeight } = useWindowDimensions();
 
   const expandedHeight = Math.min(Math.max(520, Math.round(screenHeight * 0.74)), 700);
-  const collapsedHeight = Math.min(Math.max(360, Math.round(screenHeight * 0.42)), 430);
+  const collapsedHeight = Math.min(Math.max(420, Math.round(screenHeight * 0.5)), 500);
 
   const [sheetHeight, setSheetHeight] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -102,14 +104,14 @@ export default function PoiDetailsSheet({
 
   if (!visible || !poi) return null;
 
-  const title = poi.title ?? "Ponto de Interesse";
-  const subtitle = poi.subtitle ?? "VIANA DO CASTELO, PORTUGAL";
-  const eta = poi.etaText ?? "Tempo estimado: 6 min";
+  const title = poi.title ?? t("poiDetails.fallback_title");
+  const subtitle = poi.subtitle ?? t("poiDetails.fallback_subtitle");
+  const eta = poi.etaText ?? t("poiDetails.fallback_eta");
   const distance = poi.distanceText ?? "2,4 km";
   const shortDesc =
     poi.shortDescription ??
     poi.description ??
-    "Seleciona este destino para veres as opções de rota disponíveis.";
+    t("poiDetails.fallback_description");
 
   return (
     <Modal
@@ -137,7 +139,7 @@ export default function PoiDetailsSheet({
             <View style={styles.headerRow}>
               <View style={styles.destRow}>
                 <View style={styles.greenDot} />
-                <Text style={styles.destLabel}>Destino</Text>
+                <Text style={styles.destLabel}>{t("navigation.destination")}</Text>
               </View>
 
               <Pressable
@@ -145,7 +147,7 @@ export default function PoiDetailsSheet({
                 hitSlop={12}
                 style={styles.closeBtn}
                 accessibilityRole="button"
-                accessibilityLabel="Fechar"
+                accessibilityLabel={t("common.cancel")}
               >
                 <Text style={styles.closeText}>×</Text>
               </Pressable>
@@ -160,7 +162,10 @@ export default function PoiDetailsSheet({
             </Text>
 
             <View style={styles.heroWrap}>
-              <Image source={{ uri: heroImage }} style={styles.heroImg} />
+              <Image
+                source={{ uri: heroImage }}
+                style={[styles.heroImg, !expanded && styles.heroImgCollapsed]}
+              />
             </View>
           </View>
 
@@ -192,9 +197,9 @@ export default function PoiDetailsSheet({
               onPress={() => onStartNavigation?.(poi)}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Selecionar rota"
+              accessibilityLabel={t("poiDetails.select_route")}
             >
-              <Text style={styles.ctaText}>Selecionar rota</Text>
+              <Text style={styles.ctaText}>{t("poiDetails.select_route")}</Text>
             </Pressable>
           </View>
         </View>
@@ -308,6 +313,10 @@ const styles = StyleSheet.create({
     height: 170,
     borderRadius: 16,
     backgroundColor: "#E7ECF2",
+  },
+
+  heroImgCollapsed: {
+    height: 132,
   },
 
   metaRow: {

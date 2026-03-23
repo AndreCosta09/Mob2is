@@ -1,9 +1,11 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 
-export default function LocationBlockedScreen({ onRetry, onOpenSettings }) {
+export default function LocationBlockedScreen({ onRetry, onOpenSettings, onContinue }) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   return (
     <View style={[styles.page, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
@@ -12,27 +14,25 @@ export default function LocationBlockedScreen({ onRetry, onOpenSettings }) {
 
       <View style={styles.content}>
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>Localização necessária</Text>
+          <Text style={styles.badgeText}>{t("locationBlocked.badge")}</Text>
         </View>
 
-        <Text style={styles.title}>Não é possível usar a app sem localização</Text>
-
-        <Text style={styles.description}>
-          Recusou o acesso à localização. Para proteger a experiência, as funcionalidades da Mob2is ficam bloqueadas até autorizar essa permissão.
-        </Text>
-
-        <Text style={styles.helper}>
-          Pode voltar a tentar agora ou ativar a permissão nas definições do dispositivo.
-        </Text>
+        <Text style={styles.title}>{t("locationBlocked.title")}</Text>
+        <Text style={styles.description}>{t("locationBlocked.description")}</Text>
+        <Text style={styles.helper}>{t("locationBlocked.helper")}</Text>
       </View>
 
       <View style={styles.actions}>
         <Pressable onPress={onOpenSettings} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Abrir definições</Text>
+          <Text style={styles.primaryButtonText}>{t("locationBlocked.open_settings")}</Text>
         </Pressable>
 
         <Pressable onPress={onRetry} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Tentar novamente</Text>
+          <Text style={styles.secondaryButtonText}>{t("locationBlocked.retry")}</Text>
+        </Pressable>
+
+        <Pressable onPress={onContinue} style={styles.tertiaryButton}>
+          <Text style={styles.tertiaryButtonText}>{t("locationBlocked.continue_without_location")}</Text>
         </Pressable>
       </View>
     </View>
@@ -134,5 +134,14 @@ const styles = StyleSheet.create({
     color: "#0B2D4D",
     fontSize: 16,
     fontWeight: "900",
+  },
+  tertiaryButton: {
+    alignItems: "center",
+    paddingVertical: 6,
+  },
+  tertiaryButtonText: {
+    color: "rgba(11,45,77,0.72)",
+    fontSize: 14,
+    fontWeight: "800",
   },
 });

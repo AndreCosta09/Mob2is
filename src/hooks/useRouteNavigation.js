@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Linking } from "react-native";
 import Geolocation from "react-native-geolocation-service";
+import { useTranslation } from "react-i18next";
 
 import {
   calculateRouteMultiObjective,
@@ -8,17 +9,15 @@ import {
   getClassifiedStreets,
   VIANA_COORDS,
 } from "../api/mockApi";
-import { extractLinesFromCaminho, haversineMeters, splitLineOnGaps } from "../utils/map/geo";
-import {
-  buildRouteGeojsonFromCaminho,
-  buildStreetIndex,
-  estimateEtaMinutesFromLines,
-} from "../utils/map/route";
+import { haversineMeters } from "../utils/map/geo";
+import { buildRouteGeojsonFromCaminho } from "../utils/map/route";
 import {
   DEV_STATIC_LOCATION_COORDS,
   ensureLocationReady,
   shouldUseDevStaticLocation,
 } from "../utils/locationPermission";
+import { getMotionDuration } from "../utils/accessibility";
+import { devLog, devWarn } from "../utils/logger";
 
 function mapConditionToIncapacidade(conditionKey) {
   if (conditionKey === "asd") return "Autismo";
@@ -30,33 +29,10 @@ function isCustomDestinationPoi(poi) {
   return !!poi?.isCustomPoint || poi?.graphPointId == null;
 }
 
-function routeSignature(route) {
-  if (Array.isArray(route?.caminho) && route.caminho.length) {
-    return `c:${JSON.stringify(route.caminho)}`;
-  }
-
-  return `perfil:${route?.perfil ?? "unknown"}`;
-}
-
 function normalizePreferredPerfil(value) {
   return value === "rapida" || value === "acessivel" || value === "equilibrada"
     ? value
     : "equilibrada";
-}
-
-function dedupeMultiRoutes(rotas = []) {
-  const out = [];
-  const seen = new Set();
-
-  for (const route of rotas) {
-    if (!route) continue;
-    const sig = routeSignature(route);
-    if (seen.has(sig)) continue;
-    seen.add(sig);
-    out.push(route);
-  }
-
-  return out;
 }
 
 function resolvePoiEnd(poi) {
@@ -90,7 +66,6 @@ function bearingDeg([lng1, lat1], [lng2, lat2]) {
   return (toDeg(bearingRad) + 360) % 360;
 }
 
-
 function lerpAngle(a, b, t) {
   const d = ((b - a + 540) % 360) - 180;
   return (a + d * t + 360) % 360;
@@ -103,66 +78,41 @@ function offsetForwardMeters([lng, lat], headingDeg, meters) {
   return [lng + dLng, lat + dLat];
 }
 
-function normalizeRouteGeojson(fc) {
-  if (!fc?.features?.length) return { type: "FeatureCollection", features: [] };
-
-  const out = [];
-  for (const f of fc.features) {
-    if (!f?.geometry) continue;
-
-    if (f.geometry.type === "LineString") {
-      out.push(f);
-      continue;
-    }
-    if (f.geometry.type === "MultiLineString") {
-      for (const coords of f.geometry.coordinates ?? []) {
-        out.push({
-          type: "Feature",
-          properties: { ...(f.properties ?? {}) },
-          geometry: { type: "LineString", coordinates: coords },
-        });
-      }
-    }
-  }
-  return { type: "FeatureCollection", features: out };
-}
-
 function pointSegDistanceMeters(p, a, b) {
   const lat0 = p[1];
   const mLat = 111320;
   const mLng = 111320 * Math.cos((lat0 * Math.PI) / 180);
 
-  const px = p[0] * mLng,
-    py = p[1] * mLat;
-  const ax = a[0] * mLng,
-    ay = a[1] * mLat;
-  const bx = b[0] * mLng,
-    by = b[1] * mLat;
+  const px = p[0] * mLng;
+  const py = p[1] * mLat;
+  const ax = a[0] * mLng;
+  const ay = a[1] * mLat;
+  const bx = b[0] * mLng;
+  const by = b[1] * mLat;
 
-  const vx = bx - ax,
-    vy = by - ay;
-  const wx = px - ax,
-    wy = py - ay;
+  const vx = bx - ax;
+  const vy = by - ay;
+  const wx = px - ax;
+  const wy = py - ay;
 
   const vv = vx * vx + vy * vy;
   let t = 0;
   if (vv > 0) t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / vv));
 
-  const cx = ax + t * vx,
-    cy = ay + t * vy;
-  const dx = px - cx,
-    dy = py - cy;
+  const cx = ax + t * vx;
+  const cy = ay + t * vy;
+  const dx = px - cx;
+  const dy = py - cy;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
 function distanceToRouteMeters(userLngLat, flatCoords, cursorIdx) {
   if (!flatCoords?.length || flatCoords.length < 2) return Infinity;
 
-  const SEARCH_BEHIND = 40;
-  const SEARCH_AHEAD = 160;
-
-  const start = Math.max(0, (cursorIdx ?? 0) - SEARCH_BEHIND);
-  const end = Math.min(flatCoords.length - 2, (cursorIdx ?? 0) + SEARCH_AHEAD);
+  const searchBehind = 40;
+  const searchAhead = 160;
+  const start = Math.max(0, (cursorIdx ?? 0) - searchBehind);
+  const end = Math.min(flatCoords.length - 2, (cursorIdx ?? 0) + searchAhead);
 
   let best = Infinity;
   for (let i = start; i <= end; i++) {
@@ -178,7 +128,10 @@ export default function useRouteNavigation({
   insets = { top: 0, bottom: 0 },
   condition,
   routePreference,
+  reduceMotion = false,
 }) {
+  const { t } = useTranslation();
+
   const conditionRef = useRef(condition);
   useEffect(() => {
     conditionRef.current = condition;
@@ -192,7 +145,6 @@ export default function useRouteNavigation({
   const [selectedPoi, setSelectedPoi] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  
   const [routeActive, setRouteActive] = useState(false);
   const [navSheetOpen, setNavSheetOpen] = useState(false);
 
@@ -208,7 +160,7 @@ export default function useRouteNavigation({
     activePerfilRef.current = activePerfil;
   }, [activePerfil]);
 
-  const [navMode, setNavMode] = useState("idle"); // idle | preview | follow
+  const [navMode, setNavMode] = useState("idle");
   const navModeRef = useRef("idle");
   useEffect(() => {
     navModeRef.current = navMode;
@@ -219,14 +171,9 @@ export default function useRouteNavigation({
   const [routeSegments, setRouteSegments] = useState([]);
   const [etaMin, setEtaMin] = useState(0);
 
-  // LocalizaÃƒÂ§ÃƒÂ£o
   const [userCoord, setUserCoord] = useState(null);
   const didCenterOnUser = useRef(false);
 
-  // Ruas indexadas
-
-  // Cache rota (progressÃƒÂ£o)
-  const streetsIndexRef = useRef(null);
   const routeNormRef = useRef(null);
   const flatCoordsRef = useRef([]);
   const indexMapRef = useRef([]);
@@ -236,10 +183,9 @@ export default function useRouteNavigation({
   const lastCoordRef = useRef(null);
   const lastCamTsRef = useRef(0);
 
-  // Off-route recalc
-  const OFF_ROUTE_M = 40;
-  const OFF_ROUTE_CONFIRM_COUNT = 1;
-  const MIN_RECALC_INTERVAL_MS = 15_000;
+  const offRouteMeters = 40;
+  const offRouteConfirmCount = 1;
+  const minRecalcIntervalMs = 15000;
 
   const routeInFlightRef = useRef(false);
   const lastRecalcAtRef = useRef(0);
@@ -247,13 +193,18 @@ export default function useRouteNavigation({
 
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeCalculationMessage, setRouteCalculationMessage] = useState(
-    "A calcular a melhor rota para si"
+    t("routeFlow.calculating_route")
   );
   const [apiErrorMessage, setApiErrorMessage] = useState("");
-
-
+  const applyLocationRef = useRef(() => {});
 
   const [classifiedStreetsRaw, setClassifiedStreetsRaw] = useState([]);
+
+  useEffect(() => {
+    if (!isCalculatingRoute) {
+      setRouteCalculationMessage(t("routeFlow.calculating_route"));
+    }
+  }, [isCalculatingRoute, t]);
 
   useEffect(() => {
     if (routeActive) return;
@@ -264,7 +215,7 @@ export default function useRouteNavigation({
     if (!cameraRef?.current?.setCamera) return;
     cameraRef.current.setCamera({
       animationMode: "easeTo",
-      animationDuration: 250,
+      animationDuration: getMotionDuration(reduceMotion, 250),
       ...opts,
     });
   };
@@ -276,16 +227,16 @@ export default function useRouteNavigation({
       pitch: 0,
       heading: 0,
       animationMode: "flyTo",
-      animationDuration: 650,
+      animationDuration: getMotionDuration(reduceMotion, 650),
     });
   };
 
   const getRouteBbox = (fc) => {
     const feats = fc?.features ?? [];
-    let minLng = Infinity,
-      minLat = Infinity,
-      maxLng = -Infinity,
-      maxLat = -Infinity;
+    let minLng = Infinity;
+    let minLat = Infinity;
+    let maxLng = -Infinity;
+    let maxLat = -Infinity;
     let count = 0;
 
     const pushCoord = (c) => {
@@ -300,11 +251,8 @@ export default function useRouteNavigation({
     };
 
     for (const f of feats) {
-      const g = f?.geometry;
-      if (!g) continue;
-
-      if (g.type === "LineString") (g.coordinates ?? []).forEach(pushCoord);
-      else if (g.type === "MultiLineString") (g.coordinates ?? []).forEach((ln) => (ln ?? []).forEach(pushCoord));
+      const coords = f?.geometry?.coordinates ?? [];
+      coords.forEach(pushCoord);
     }
 
     if (!count || !Number.isFinite(minLng) || !Number.isFinite(minLat)) return null;
@@ -322,17 +270,29 @@ export default function useRouteNavigation({
 
     try {
       if (cameraRef?.current?.fitBounds) {
-        cameraRef.current.fitBounds(bbox.ne, bbox.sw, [paddingTop, paddingRight, paddingBottom, paddingLeft], 650);
+        cameraRef.current.fitBounds(
+          bbox.ne,
+          bbox.sw,
+          [paddingTop, paddingRight, paddingBottom, paddingLeft],
+          getMotionDuration(reduceMotion, 650)
+        );
         return;
       }
 
       if (cameraRef?.current?.setCamera) {
         cameraRef.current.setCamera({
-          bounds: { ne: bbox.ne, sw: bbox.sw, paddingTop, paddingRight, paddingBottom, paddingLeft },
+          bounds: {
+            ne: bbox.ne,
+            sw: bbox.sw,
+            paddingTop,
+            paddingRight,
+            paddingBottom,
+            paddingLeft,
+          },
           pitch: 0,
           heading: 0,
           animationMode: "easeTo",
-          animationDuration: 650,
+          animationDuration: getMotionDuration(reduceMotion, 650),
         });
       }
     } catch (e) {
@@ -340,13 +300,13 @@ export default function useRouteNavigation({
     }
   };
 
-  const rebuildRouteCache = (routeFcNormalized) => {
-    routeNormRef.current = routeFcNormalized;
+  const rebuildRouteCache = (routeGeojson) => {
+    routeNormRef.current = routeGeojson;
     flatCoordsRef.current = [];
     indexMapRef.current = [];
     nearestIdxRef.current = 0;
 
-    const feats = routeFcNormalized?.features ?? [];
+    const feats = routeGeojson?.features ?? [];
     for (let fi = 0; fi < feats.length; fi++) {
       const coords = feats[fi]?.geometry?.coordinates ?? [];
       for (let ci = 0; ci < coords.length; ci++) {
@@ -355,7 +315,7 @@ export default function useRouteNavigation({
       }
     }
 
-    setRouteRemainingGeojson(routeFcNormalized);
+    setRouteRemainingGeojson(routeGeojson);
   };
 
   const buildRemainingFromIndex = (globalIdx) => {
@@ -391,10 +351,9 @@ export default function useRouteNavigation({
     if (!flat?.length) return;
 
     const lastIdx = nearestIdxRef.current ?? 0;
-
-    const W = 220;
-    const from = Math.max(0, lastIdx - W);
-    const to = Math.min(flat.length - 1, lastIdx + W);
+    const windowSize = 220;
+    const from = Math.max(0, lastIdx - windowSize);
+    const to = Math.min(flat.length - 1, lastIdx + windowSize);
 
     let bestIdx = lastIdx;
     let bestD = Infinity;
@@ -451,45 +410,50 @@ export default function useRouteNavigation({
       pitch: 68,
       heading: headingRef.current,
       animationMode: "easeTo",
-      animationDuration: 220,
+      animationDuration: getMotionDuration(reduceMotion, 220),
     });
   };
 
   const applyPathDataToMap = async (pd, { keepFollowing = false, fromLngLat = null } = {}) => {
-  if (!pd) {
-    console.warn("[Mob2is] applyPathDataToMap sem path data");
-    return false;
-  }
+    if (!pd) {
+      devWarn("[Mob2is] applyPathDataToMap sem path data");
+      return false;
+    }
 
-  const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
+    const caminho = Array.isArray(pd?.caminho) ? pd.caminho : [];
+    const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
 
-  console.log("[Mob2is] applyPathDataToMap input", {
-    perfil: pd?.perfil,
-    caminhoCount: Array.isArray(pd?.caminho) ? pd.caminho.length : 0,
-    accessCount: Array.isArray(accessArr) ? accessArr.length : 0,
-  });
-
-  const builtFromPontos = null;
-
-  if (builtFromPontos?.geojson?.features?.length) {
-    console.log("[Mob2is] rota construÃƒÂ­da via pontos", {
+    devLog("[Mob2is] applyPathDataToMap input", {
       perfil: pd?.perfil,
-      featureCount: builtFromPontos.geojson.features.length,
-      segmentCount: builtFromPontos.segments.length,
+      caminhoCount: caminho.length,
+      accessCount: Array.isArray(accessArr) ? accessArr.length : 0,
     });
 
-    const norm = normalizeRouteGeojson(builtFromPontos.geojson);
+    const built = buildRouteGeojsonFromCaminho(caminho, accessArr);
+    const routeGeojson = built.geojson;
 
-    setRouteFullGeojson(norm);
-    rebuildRouteCache(norm);
+    if (!routeGeojson?.features?.length) {
+      console.warn("[Mob2is] sem geometria desenhavel na rota", {
+        perfil: pd?.perfil,
+        pd,
+      });
+      return false;
+    }
 
-    setRouteSegments(builtFromPontos.segments);
-    setEtaMin(estimateEtaMinutesFromLines(builtFromPontos.linesForEta, conditionRef.current));
+    setRouteFullGeojson(routeGeojson);
+    rebuildRouteCache(routeGeojson);
+
+    setRouteSegments(built.segments);
+    setEtaMin(
+      Number.isFinite(Number(pd?.estimated_time_min)) && Number(pd?.estimated_time_min) > 0
+        ? Math.round(Number(pd.estimated_time_min))
+        : 0
+    );
     setRouteActive(true);
 
     if (!keepFollowing) {
       setNavMode("preview");
-      fitRouteToView(norm, { bottomPad: tabBarH + 420 });
+      fitRouteToView(routeGeojson, { bottomPad: tabBarH + 420 });
     }
 
     if (keepFollowing && fromLngLat) {
@@ -498,48 +462,7 @@ export default function useRouteNavigation({
     }
 
     return true;
-  }
-
-  const lines = extractLinesFromCaminho(pd?.caminho);
-  const safeLines = lines.flatMap((l) => splitLineOnGaps(l, 350));
-
-  console.log("[Mob2is] rota construida via caminho", {
-    perfil: pd?.perfil,
-    rawLines: lines.length,
-    safeLines: safeLines.length,
-    totalPoints: safeLines.reduce((acc, l) => acc + l.length, 0),
-  });
-
-  if (!safeLines.length) {
-    console.warn("[Mob2is] sem geometria desenhÃƒÂ¡vel na rota", {
-      perfil: pd?.perfil,
-      pd,
-    });
-    return false;
-  }
-
-  const built = buildRouteGeojsonFromCaminho(safeLines, accessArr);
-  const norm = normalizeRouteGeojson(built.geojson);
-
-  setRouteFullGeojson(norm);
-  rebuildRouteCache(norm);
-
-  setRouteSegments(built.segments);
-  setEtaMin(estimateEtaMinutesFromLines(safeLines, conditionRef.current));
-  setRouteActive(true);
-
-  if (!keepFollowing) {
-    setNavMode("preview");
-    fitRouteToView(norm, { bottomPad: tabBarH + 420 });
-  }
-
-  if (keepFollowing && fromLngLat) {
-    updateNavProgress(fromLngLat);
-    setRouteRemainingGeojson(buildRemainingFromIndex(nearestIdxRef.current));
-  }
-
-  return true;
-};
+  };
 
   const recalcRouteFromHere = async (fromLngLat) => {
     if (!selectedPoi?.coords) return;
@@ -548,11 +471,11 @@ export default function useRouteNavigation({
     const [lng, lat] = fromLngLat;
     const [lngE, latE] = selectedPoi.coords;
 
-   const customPoint = isCustomDestinationPoi(selectedPoi);
-   const end = customPoint ? null : resolvePoiEnd(selectedPoi);
+    const customPoint = isCustomDestinationPoi(selectedPoi);
+    const end = customPoint ? null : resolvePoiEnd(selectedPoi);
 
     if (!customPoint && end == null) {
-      throw new Error("POI sem identificador de destino vÃƒÂ¡lido (Ponto/graphPointId).");
+      throw new Error("POI sem identificador de destino valido (Ponto/graphPointId).");
     }
 
     const perfil = activePerfilRef.current ?? null;
@@ -567,7 +490,9 @@ export default function useRouteNavigation({
       perfil,
     });
 
-    const pd = Array.isArray(resp?.rotas) ? resp.rotas.find((r) => r?.perfil === perfil) || resp.rotas[0] : resp;
+    const pd = Array.isArray(resp?.rotas)
+      ? resp.rotas.find((r) => r?.perfil === perfil) || resp.rotas[0]
+      : resp;
     await applyPathDataToMap(pd, { keepFollowing: true, fromLngLat });
   };
 
@@ -577,17 +502,17 @@ export default function useRouteNavigation({
     if (routeInFlightRef.current) return;
 
     const now = Date.now();
-    if (now - lastRecalcAtRef.current < MIN_RECALC_INTERVAL_MS) return;
+    if (now - lastRecalcAtRef.current < minRecalcIntervalMs) return;
 
     const d = distanceToRouteMeters(userLngLat, flatCoordsRef.current, nearestIdxRef.current);
 
-    if (d <= OFF_ROUTE_M) {
+    if (d <= offRouteMeters) {
       offRouteCountRef.current = 0;
       return;
     }
 
     offRouteCountRef.current += 1;
-    if (offRouteCountRef.current < OFF_ROUTE_CONFIRM_COUNT) return;
+    if (offRouteCountRef.current < offRouteConfirmCount) return;
 
     offRouteCountRef.current = 0;
     lastRecalcAtRef.current = now;
@@ -598,7 +523,7 @@ export default function useRouteNavigation({
       setApiErrorMessage("");
     } catch (error) {
       console.warn("[Mob2is] recalculateRouteFromHere error:", error);
-      setApiErrorMessage(getApiErrorMessage(error, "Nao foi possivel recalcular a rota."));
+      setApiErrorMessage(getApiErrorMessage(error, t("api.cannot_recalculate_route")));
     } finally {
       routeInFlightRef.current = false;
     }
@@ -611,7 +536,14 @@ export default function useRouteNavigation({
 
     if (!didCenterOnUser.current) {
       didCenterOnUser.current = true;
-      setCam({ centerCoordinate: c, zoomLevel: 15, pitch: 0, heading: 0, animationMode: "flyTo", animationDuration: 900 });
+      setCam({
+        centerCoordinate: c,
+        zoomLevel: 15,
+        pitch: 0,
+        heading: 0,
+        animationMode: "flyTo",
+        animationDuration: getMotionDuration(reduceMotion, 900),
+      });
       return;
     }
 
@@ -621,6 +553,9 @@ export default function useRouteNavigation({
     }
   };
 
+  useEffect(() => {
+    applyLocationRef.current = applyLocation;
+  });
 
   useEffect(() => {
     let watchId = null;
@@ -628,22 +563,22 @@ export default function useRouteNavigation({
 
     const start = async () => {
       try {
-
         if (shouldUseDevStaticLocation()) {
-          console.log("[Mob2is] A usar localizaÃƒÂ§ÃƒÂ£o fixa de desenvolvimento", {
+          console.log("[Mob2is] A usar localizacao fixa de desenvolvimento", {
             lng: DEV_STATIC_LOCATION_COORDS[0],
             lat: DEV_STATIC_LOCATION_COORDS[1],
           });
-          applyLocation(DEV_STATIC_LOCATION_COORDS[0], DEV_STATIC_LOCATION_COORDS[1]);
+          applyLocationRef.current(DEV_STATIC_LOCATION_COORDS[0], DEV_STATIC_LOCATION_COORDS[1]);
           return;
         }
+
         watchId = Geolocation.watchPosition(
           (pos) => {
             if (!alive) return;
             const { longitude, latitude } = pos.coords || {};
-            applyLocation(longitude, latitude);
+            applyLocationRef.current(longitude, latitude);
           },
-          (err) => console.warn("[Mob2is] watchPosition error:", err),
+          (err) => devWarn("[Mob2is] watchPosition error:", err),
           {
             enableHighAccuracy: true,
             distanceFilter: 1,
@@ -654,7 +589,7 @@ export default function useRouteNavigation({
           }
         );
       } catch (e) {
-        console.warn("[Mob2is] start watch error:", e);
+        devWarn("[Mob2is] start watch error:", e);
       }
     };
 
@@ -665,35 +600,30 @@ export default function useRouteNavigation({
       if (watchId != null) Geolocation.clearWatch(watchId);
       Geolocation.stopObserving?.();
     };
-
   }, []);
 
-
   useEffect(() => {
-  let alive = true;
+    let alive = true;
 
-  (async () => {
-        try {
-          const raw = await getClassifiedStreets();
-          const idx = buildStreetIndex(raw);
-
-          if (alive) {
-            streetsIndexRef.current = idx;
-            setClassifiedStreetsRaw(Array.isArray(raw) ? raw : []);
-            setApiErrorMessage("");
-          }
-        } catch (e) {
-          console.warn("getClassifiedStreets error:", e);
-          if (alive) {
-            setApiErrorMessage(getApiErrorMessage(e, "Nao foi possivel carregar a acessibilidade das ruas."));
-          }
+    (async () => {
+      try {
+        const raw = await getClassifiedStreets();
+        if (alive) {
+          setClassifiedStreetsRaw(Array.isArray(raw) ? raw : []);
+          setApiErrorMessage("");
         }
-      })();
+      } catch (e) {
+        console.warn("getClassifiedStreets error:", e);
+        if (alive) {
+          setApiErrorMessage(getApiErrorMessage(e, t("api.cannot_load_street_accessibility")));
+        }
+      }
+    })();
 
-      return () => {
-        alive = false;
-      };
-    }, []);
+    return () => {
+      alive = false;
+    };
+  }, [t]);
 
   const pickDestination = (poi) => {
     setSelectedPoi(poi);
@@ -722,7 +652,14 @@ export default function useRouteNavigation({
     lastCoordRef.current = null;
 
     if (poi?.coords) {
-      setCam({ centerCoordinate: poi.coords, zoomLevel: 15.2, pitch: 0, heading: 0, animationMode: "flyTo", animationDuration: 650 });
+      setCam({
+        centerCoordinate: poi.coords,
+        zoomLevel: 15.2,
+        pitch: 0,
+        heading: 0,
+        animationMode: "flyTo",
+        animationDuration: getMotionDuration(reduceMotion, 650),
+      });
     }
   };
 
@@ -771,12 +708,12 @@ export default function useRouteNavigation({
   const handleRouteLocationFailure = (status) => {
     if (status === "denied") {
       Alert.alert(
-        "Permissao de localizacao necessaria",
-        "Para calcular a rota, permita o acesso a localizacao nas definicoes do dispositivo.",
+        t("routeFlow.permission_required_title"),
+        t("routeFlow.permission_required_message"),
         [
-          { text: "Cancelar", style: "cancel" },
+          { text: t("common.cancel"), style: "cancel" },
           {
-            text: "Abrir definicoes",
+            text: t("routeFlow.open_settings"),
             onPress: () => {
               Linking.openSettings().catch((error) => {
                 console.warn("[Mob2is] Nao foi possivel abrir as definicoes:", error);
@@ -789,9 +726,9 @@ export default function useRouteNavigation({
     }
 
     Alert.alert(
-      "Ative a localizacao",
-      "Antes de calcular a rota, ative a localizacao do dispositivo e volte a tentar.",
-      [{ text: "OK" }]
+      t("routeFlow.enable_location_title"),
+      t("routeFlow.enable_location_message"),
+      [{ text: t("common.ok") }]
     );
   };
 
@@ -811,106 +748,105 @@ export default function useRouteNavigation({
     return null;
   };
 
-const startNavigation = async (poiArg) => {
-  const poi = poiArg ?? selectedPoi;
-  if (!poi?.coords) return;
+  const startNavigation = async (poiArg) => {
+    const poi = poiArg ?? selectedPoi;
+    if (!poi?.coords) return;
 
-  const [lngE, latE] = poi.coords;
+    const [lngE, latE] = poi.coords;
+    const incapacidade = mapConditionToIncapacidade(conditionRef.current);
 
-  const incapacidade = mapConditionToIncapacidade(conditionRef.current);
-
-  const end = resolvePoiEnd(poi);
-  if (end == null && !poi?.isCustomPoint) {
-    console.warn("[Mob2is] POI sem end vÃƒÂ¡lido");
-    return;
-  }
-
-  setIsCalculatingRoute(true);
-  setRouteCalculationMessage("A verificar a sua localizacao");
-  setApiErrorMessage("");
-
-  console.log("[Mob2is] startNavigation", {
-    poi: poi?.title,
-    end: poi?.isCustomPoint ? null : end,
-    incapacidade,
-  });
-
-  try {
-    const from = await ensureLocationForRoute();
-    if (!from) {
-      setDetailsOpen(true);
+    const end = resolvePoiEnd(poi);
+    if (end == null && !poi?.isCustomPoint) {
+      console.warn("[Mob2is] POI sem end valido");
       return;
     }
 
-    const [lng, lat] = from;
+    setIsCalculatingRoute(true);
+    setRouteCalculationMessage(t("routeFlow.checking_location"));
+    setApiErrorMessage("");
 
-    setSelectedPoi(poi);
-    setDetailsOpen(false);
-    setNavSheetOpen(false);
-    setFollowing(false);
-    setActivePerfil(null);
-    setRouteCalculationMessage("A calcular a melhor rota para si");
-
-    const resp = await calculateRouteMultiObjective({
-      incapacidade,
+    devLog("[Mob2is] startNavigation", {
+      poi: poi?.title,
       end: poi?.isCustomPoint ? null : end,
-      lati: lat,
-      longi: lng,
-      latE,
-      lngE,
-      perfil: null,
+      incapacidade,
     });
 
-    console.log("[Mob2is] resposta final multi-rota", resp);
+    try {
+      const from = await ensureLocationForRoute();
+      if (!from) {
+        setDetailsOpen(true);
+        return;
+      }
 
-    const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
-    if (!rotas.length) {
-      console.warn("[Mob2is] resposta sem rotas");
-      setDetailsOpen(true);
-      return;
-    }
+      const [lng, lat] = from;
 
-    const preferredOrder = [
-      routePreferenceRef.current,
-      "equilibrada",
-      "rapida",
-      "acessivel",
-    ].filter((perfil, index, arr) => arr.indexOf(perfil) === index);
+      setSelectedPoi(poi);
+      setDetailsOpen(false);
+      setNavSheetOpen(false);
+      setFollowing(false);
+      setActivePerfil(null);
+      setRouteCalculationMessage(t("routeFlow.calculating_route"));
 
-    const pick =
-      preferredOrder
-        .map((perfil) => rotas.find((route) => route?.perfil === perfil))
-        .find(Boolean) || rotas[0];
+      const resp = await calculateRouteMultiObjective({
+        incapacidade,
+        end: poi?.isCustomPoint ? null : end,
+        lati: lat,
+        longi: lng,
+        latE,
+        lngE,
+        perfil: null,
+      });
 
-    setRouteOptions(rotas);
-    setSelectedPerfil(pick?.perfil ?? "equilibrada");
+      devLog("[Mob2is] resposta final multi-rota", resp);
 
-    const applied = await applyPathDataToMap(pick, { keepFollowing: false });
+      const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
+      if (!rotas.length) {
+        console.warn("[Mob2is] resposta sem rotas");
+        setDetailsOpen(true);
+        return;
+      }
 
-    console.log("[Mob2is] applyPathDataToMap resultado", {
-      applied,
-      pickedPerfil: pick?.perfil,
-    });
+      const preferredOrder = [
+        routePreferenceRef.current,
+        "equilibrada",
+        "rapida",
+        "acessivel",
+      ].filter((perfil, index, arr) => arr.indexOf(perfil) === index);
 
-    if (!applied) {
+      const pick =
+        preferredOrder
+          .map((perfil) => rotas.find((route) => route?.perfil === perfil))
+          .find(Boolean) || rotas[0];
+
+      setRouteOptions(rotas);
+      setSelectedPerfil(pick?.perfil ?? "equilibrada");
+
+      const applied = await applyPathDataToMap(pick, { keepFollowing: false });
+
+      devLog("[Mob2is] applyPathDataToMap resultado", {
+        applied,
+        pickedPerfil: pick?.perfil,
+      });
+
+      if (!applied) {
+        setRouteActive(false);
+        setNavSheetOpen(false);
+        setDetailsOpen(true);
+        return;
+      }
+
+      setApiErrorMessage("");
+      setNavSheetOpen(true);
+    } catch (e) {
+      console.warn("calculateRouteMultiObjective error:", e);
+      setApiErrorMessage(getApiErrorMessage(e, t("api.cannot_calculate_route")));
       setRouteActive(false);
       setNavSheetOpen(false);
       setDetailsOpen(true);
-      return;
+    } finally {
+      setIsCalculatingRoute(false);
     }
-
-    setApiErrorMessage("");
-    setNavSheetOpen(true);
-  } catch (e) {
-    console.warn("calculateRouteMultiObjective error:", e);
-    setApiErrorMessage(getApiErrorMessage(e, "Nao foi possivel calcular a rota."));
-    setRouteActive(false);
-    setNavSheetOpen(false);
-    setDetailsOpen(true);
-  } finally {
-    setIsCalculatingRoute(false);
-  }
-};
+  };
 
   const previewPerfil = async (perfil) => {
     setSelectedPerfil(perfil);
@@ -939,12 +875,17 @@ const startNavigation = async (poiArg) => {
     startFollow();
   };
 
-  // Shapes (prontos para o Map)
   const userFeature = useMemo(() => {
     if (!userCoord) return { type: "FeatureCollection", features: [] };
     return {
       type: "FeatureCollection",
-      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: userCoord } }],
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: userCoord },
+        },
+      ],
     };
   }, [userCoord]);
 
@@ -952,14 +893,19 @@ const startNavigation = async (poiArg) => {
     if (!selectedPoi?.coords) return { type: "FeatureCollection", features: [] };
     return {
       type: "FeatureCollection",
-      features: [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: selectedPoi.coords } }],
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: selectedPoi.coords },
+        },
+      ],
     };
   }, [selectedPoi]);
 
   const routeShape = navMode === "follow" ? routeRemainingGeojson : routeFullGeojson;
 
   return {
-
     selectedPoi,
     detailsOpen,
     routeActive,

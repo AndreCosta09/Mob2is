@@ -2,14 +2,12 @@ import React, { useContext, useEffect, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, Linking } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-
 import { useTranslation } from "react-i18next";
-import i18n from "./src/i18n";
 
+import i18n from "./src/i18n";
 import SplashScreen from "./src/screens/SplashScreen";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
 import LocationBlockedScreen from "./src/screens/LocationBlockedScreen";
@@ -19,7 +17,6 @@ import MoreScreen from "./src/screens/MoreScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import TermsScreen from "./src/screens/TermsScreen";
 import RoutePlannerScreen from "./src/screens/RoutePlannerScreen";
-
 import CustomTabBar from "./src/components/CustomTabBar";
 import { UserContext, UserProvider } from "./src/context/UserContext";
 import { resolveLocationPermission } from "./src/utils/locationPermission";
@@ -27,7 +24,6 @@ import { resolveLocationPermission } from "./src/utils/locationPermission";
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 const MoreStack = createNativeStackNavigator();
-
 const KEY_LANG = "mob2is_lang_v1";
 
 function MoreStackNavigator() {
@@ -70,10 +66,10 @@ function MainTabs() {
 
 function AppContent() {
   const { condition, loading: userLoading, saveCondition } = useContext(UserContext) ?? {};
-
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [locationStatus, setLocationStatus] = useState("checking");
+  const [showLocationNotice, setShowLocationNotice] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -89,11 +85,13 @@ function AppContent() {
         const nextLocationStatus = await resolveLocationPermission();
         if (alive) {
           setLocationStatus(nextLocationStatus);
+          setShowLocationNotice(nextLocationStatus === "denied");
         }
       } catch (error) {
         console.error("App startup error:", error);
         if (alive) {
           setLocationStatus("denied");
+          setShowLocationNotice(true);
         }
       } finally {
         if (alive) {
@@ -118,6 +116,9 @@ function AppContent() {
         try {
           const nextLocationStatus = await resolveLocationPermission({ prompt: false });
           setLocationStatus(nextLocationStatus);
+          if (nextLocationStatus === "granted") {
+            setShowLocationNotice(false);
+          }
         } catch (error) {
           console.warn("Location permission refresh error:", error);
         }
@@ -133,9 +134,11 @@ function AppContent() {
     try {
       const nextLocationStatus = await resolveLocationPermission();
       setLocationStatus(nextLocationStatus);
+      setShowLocationNotice(nextLocationStatus === "denied");
     } catch (error) {
       console.warn("Location permission request error:", error);
       setLocationStatus("denied");
+      setShowLocationNotice(true);
     }
   };
 
@@ -160,13 +163,14 @@ function AppContent() {
       >
         {shouldShowSplash ? (
           <Stack.Screen name="Splash" component={SplashScreen} />
-        ) : locationStatus !== "granted" ? (
+        ) : locationStatus !== "granted" && showLocationNotice ? (
           <Stack.Screen name="LocationBlocked">
             {(props) => (
               <LocationBlockedScreen
                 {...props}
                 onRetry={retryLocationPermission}
                 onOpenSettings={openLocationSettings}
+                onContinue={() => setShowLocationNotice(false)}
               />
             )}
           </Stack.Screen>

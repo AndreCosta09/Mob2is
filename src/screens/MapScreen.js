@@ -18,6 +18,11 @@ import { useTranslation } from "react-i18next";
 import { UserContext } from "../context/UserContext";
 import { getApiErrorMessage, getPOIs, VIANA_COORDS } from "../api/mockApi";
 import { haversineMeters } from "../utils/map/geo";
+import {
+  getAppPalette,
+  getModalAnimationType,
+} from "../utils/accessibility";
+import { MAP_STYLE_URL } from "../config/appConfig";
 
 import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
 import useRouteNavigation from "../hooks/useRouteNavigation";
@@ -25,8 +30,19 @@ import ExploreSearchPanel from "../components/ExploreSearchPanel";
 import PoiDetailsSheet from "../components/PoiDetailsSheet";
 import NavigationSheet from "../components/NavigationSheet";
 
-const MAPTILER_KEY = "sZvLsgabyQeCL0ehvC55";
-const MAP_STYLE_URL = `https://api.maptiler.com/maps/streets-v2/style.json?key=${MAPTILER_KEY}`;
+const EMPTY_MAP_STYLE = {
+  version: 8,
+  sources: {},
+  layers: [
+    {
+      id: "background",
+      type: "background",
+      paint: {
+        "background-color": "#F3F5F7",
+      },
+    },
+  ],
+};
 
 function normTxt(s) {
   return (s ?? "")
@@ -142,12 +158,16 @@ function buildNearbyAccessibleStreetsGeoJSON(rawStreets, userCoord, conditionKey
 }
 
 
-function RouteLoadingDots() {
+function RouteLoadingDots({ reduceMotion = false, highContrast = false }) {
   const anims = useRef(
     Array.from({ length: 5 }, () => new Animated.Value(0))
   ).current;
 
+  const dotColor = highContrast ? "#000000" : "#F09C1F";
+
   useEffect(() => {
+    if (reduceMotion) return;
+
     const loops = anims.map((anim, index) =>
       Animated.loop(
         Animated.sequence([
@@ -174,7 +194,27 @@ function RouteLoadingDots() {
     return () => {
       loops.forEach((loop) => loop.stop());
     };
-  }, [anims]);
+  }, [anims, reduceMotion]);
+
+  if (reduceMotion) {
+    return (
+      <View style={styles.routeLoadingWave}>
+        {Array.from({ length: 5 }).map((_, index) => (
+          <View
+            key={`loading-dot-static-${index}`}
+            style={[
+              styles.routeLoadingWaveDot,
+              {
+                backgroundColor: dotColor,
+                shadowColor: dotColor,
+                opacity: 1,
+              },
+            ]}
+          />
+        ))}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.routeLoadingWave}>
@@ -200,6 +240,8 @@ function RouteLoadingDots() {
             style={[
               styles.routeLoadingWaveDot,
               {
+                backgroundColor: dotColor,
+                shadowColor: dotColor,
                 opacity,
                 transform: [{ translateY }, { scale }],
               },
@@ -213,19 +255,23 @@ function RouteLoadingDots() {
 
 
 
-export default function MapScreen() {
+export default function MapScreen({ route, navigation }) {
   const tabBarH = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
-  const { condition, routePreference } = useContext(UserContext) ?? {};
+  const { condition, routePreference, preferences } = useContext(UserContext) ?? {};
   const { t } = useTranslation();
+  const reduceMotion = !!preferences?.reduceMotion;
+  const highContrast = !!preferences?.highContrast;
+  const colors = useMemo(() => getAppPalette(highContrast), [highContrast]);
 
   const [pois, setPois] = useState([]);
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [isSelectingOnMap, setIsSelectingOnMap] = useState(false);
   const [showStreetAccessibility, setShowStreetAccessibility] = useState(false);
   const [poisErrorMessage, setPoisErrorMessage] = useState("");
+  const [mapStyleLoaded, setMapStyleLoaded] = useState(false);
+  const [poiRenderVersion, setPoiRenderVersion] = useState(0);
 
 
   const nav = useRouteNavigation({
@@ -234,6 +280,7 @@ export default function MapScreen() {
     insets,
     condition,
     routePreference,
+    reduceMotion,
   });
 
   const {
@@ -255,7 +302,6 @@ export default function MapScreen() {
       routeCalculationMessage,
       apiErrorMessage,
       setDetailsOpen,
-      setSelectedPoi,
       pickDestination,
       startNavigation,
       previewPerfil,
@@ -307,19 +353,24 @@ export default function MapScreen() {
       } catch (e) {
         console.warn("getPOIs error:", e);
         if (alive) {
-          setPoisErrorMessage(getApiErrorMessage(e, "Nao foi possivel carregar os pontos de interesse."));
+          setPoisErrorMessage(getApiErrorMessage(e, t("api.cannot_load_pois")));
         }
       }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [t]);
 
-  const mapErrorMessage = poisErrorMessage || apiErrorMessage;
+  const mapErrorMessage =
+    poisErrorMessage ||
+    apiErrorMessage ||
+    (!MAP_STYLE_URL ? t("map.missing_map_key") : "");
 
-  const [mapStyle, setMapStyle] = useState(MAP_STYLE_URL);
+  const [mapStyle, setMapStyle] = useState(MAP_STYLE_URL || EMPTY_MAP_STYLE);
   useEffect(() => {
+    if (!MAP_STYLE_URL) return undefined;
+
     let alive = true;
 
     (async () => {
@@ -341,18 +392,31 @@ export default function MapScreen() {
     };
   }, []);
 
-function buildCustomDestinationPoi([lng, lat]) {
+  useEffect(() => {
+    if (!mapStyleLoaded || !pois.length) return;
+
+    const timeoutId = setTimeout(() => {
+      setPoiRenderVersion((prev) => prev + 1);
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [mapStyleLoaded, pois.length, selectedCatIds.length]);
+
+function buildCustomDestinationPoi([lng, lat], t) {
   return {
     id: `custom-${Date.now()}`,
-    title: "Destino selecionado no mapa",
+    title: t("map.custom_destination_title"),
     categoryId: "custom",
     categoryName: "Custom",
     coords: [lng, lat],
     graphPointId: null,
     isCustomPoint: true,
-    description: `Ponto selecionado manualmente no mapa (${lat.toFixed(6)}, ${lng.toFixed(6)}).`,
-    routeSummary: "Destino personalizado",
-    trafficSummary: "Selecionado no mapa",
+    description: t("map.custom_destination_description", {
+      lat: lat.toFixed(6),
+      lng: lng.toFixed(6),
+    }),
+    routeSummary: t("map.custom_route_summary"),
+    trafficSummary: t("map.custom_traffic_summary"),
     image: null,
     rating: null,
     phone: null,
@@ -386,20 +450,8 @@ function extractMapPressLngLat(event) {
   return null;
 }
 
-function setDestinationMode(useMapSelection) {
-  if (useMapSelection === isSelectingOnMap) return;
-
-  setIsSelectingOnMap(useMapSelection);
-  setFilterOpen(false);
-
-  if (selectedPoi?.isCustomPoint) {
-    setSelectedPoi(null);
-    setDetailsOpen(false);
-  }
-}
-
 function handleMapPress(event) {
-  if (!isSelectingOnMap || routeActive) return;
+  if (routeActive) return;
 
   const coord = extractMapPressLngLat(event);
   if (!coord) {
@@ -407,7 +459,7 @@ function handleMapPress(event) {
     return;
   }
 
-  const customPoi = buildCustomDestinationPoi(coord);
+  const customPoi = buildCustomDestinationPoi(coord, t);
   pickDestination(customPoi);
 }
 
@@ -424,6 +476,14 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
   );
 }, [showStreetAccessibility, classifiedStreetsRaw, userCoord, condition, routeActive]);
 
+useEffect(() => {
+  const destination = route?.params?.destination;
+  if (!destination?.coords) return;
+
+  pickDestination(destination);
+  navigation?.setParams?.({ destination: undefined });
+}, [route?.params?.destination, navigation, pickDestination]);
+
 
   return (
     <View style={styles.page}>
@@ -435,6 +495,7 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
         preferredFramesPerSecond={30}
         surfaceView={true}
         onPress={handleMapPress}
+        onDidFinishLoadingStyle={() => setMapStyleLoaded(true)}
       >
         <MapLibreGL.Camera
           ref={cameraRef}
@@ -451,59 +512,71 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
           <MapLibreGL.CircleLayer
             id="user-halo"
             style={{
-              circleRadius: 15,
-              circleColor: "#F09C1F",
-              circleOpacity: 0.18,
+              circleRadius: highContrast ? 18 : 15,
+              circleColor: colors.accent,
+              circleOpacity: highContrast ? 0.3 : 0.18,
               circlePitchAlignment: "map",
             }}
           />
           <MapLibreGL.CircleLayer
             id="user-dot"
             style={{
-              circleRadius: 7,
-              circleColor: "#1579B3",
-              circleStrokeWidth: 3,
-              circleStrokeColor: "#FFFFFF",
+              circleRadius: highContrast ? 8 : 7,
+              circleColor: highContrast ? colors.text : "#1579B3",
+              circleStrokeWidth: highContrast ? 4 : 3,
+              circleStrokeColor: colors.surface,
               circlePitchAlignment: "map",
             }}
           />
         </MapLibreGL.ShapeSource>
 
        {/* POIs */}
-        {!isSelectingOnMap &&
+        {mapStyleLoaded &&
           (filteredPois ?? [])
-            .filter((p) => Array.isArray(p?.coords))
-            .map((p) => (
-              <MapLibreGL.PointAnnotation
-                key={`poi-${p.id}`}
-                id={`poi-${p.id}`}
-                coordinate={p.coords}
-                onSelected={() => pickDestination(p)}
+          .filter((p) => Array.isArray(p?.coords) && p?.id !== selectedPoi?.id)
+          .map((p) => (
+            <MapLibreGL.PointAnnotation
+              key={`poi-${poiRenderVersion}-${p.id}`}
+              id={`poi-${poiRenderVersion}-${p.id}`}
+              coordinate={p.coords}
+              onSelected={() => pickDestination(p)}
+            >
+              <View
+                style={[
+                  styles.poiMarker,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: highContrast ? colors.border : "rgba(11,45,77,0.12)",
+                  },
+                ]}
               >
-                <View style={styles.poiMarker}>
-                  <PoiSvgIcon name={iconNameForPoi(p)} size={18} />
-                </View>
-              </MapLibreGL.PointAnnotation>
-            ))}
+                <PoiSvgIcon
+                  name={iconNameForPoi(p)}
+                  size={18}
+                  color={highContrast ? colors.text : undefined}
+                />
+              </View>
+            </MapLibreGL.PointAnnotation>
+          ))}
 
         {/* destino */}
         <MapLibreGL.ShapeSource id="selected-dest" shape={selectedFeature}>
           <MapLibreGL.CircleLayer
             id="dest-halo"
             style={{
-              circleRadius: 12,
-              circleColor: "#35B46F",
-              circleOpacity: 0.25,
+              circleRadius: highContrast ? 15 : 12,
+              circleColor: highContrast ? colors.text : "#35B46F",
+              circleOpacity: highContrast ? 0.22 : 0.25,
               circlePitchAlignment: "map",
             }}
           />
           <MapLibreGL.CircleLayer
             id="dest-dot"
             style={{
-              circleRadius: 7,
-              circleColor: "#35B46F",
-              circleStrokeWidth: 3,
-              circleStrokeColor: "#FFFFFF",
+              circleRadius: highContrast ? 8 : 7,
+              circleColor: colors.success,
+              circleStrokeWidth: highContrast ? 4 : 3,
+              circleStrokeColor: colors.surface,
               circlePitchAlignment: "map",
             }}
           />
@@ -516,9 +589,9 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
               <MapLibreGL.LineLayer
                 id="free-nav-streets-shadow"
                 style={{
-                  lineWidth: 6,
+                  lineWidth: highContrast ? 8 : 6,
                   lineColor: "#000000",
-                  lineOpacity: 0.08,
+                  lineOpacity: highContrast ? 0.16 : 0.08,
                   lineCap: "round",
                   lineJoin: "round",
                 }}
@@ -526,7 +599,7 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
               <MapLibreGL.LineLayer
                 id="free-nav-streets-main"
                 style={{
-                  lineWidth: 4,
+                  lineWidth: highContrast ? 5 : 4,
                   lineColor: ["get", "color"],
                   lineOpacity: 0.92,
                   lineCap: "round",
@@ -542,9 +615,9 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
             <MapLibreGL.LineLayer
               id="route-shadow"
               style={{
-                lineWidth: 11,
+                lineWidth: highContrast ? 13 : 11,
                 lineColor: "#000000",
-                lineOpacity: 0.14,
+                lineOpacity: highContrast ? 0.24 : 0.14,
                 lineCap: "round",
                 lineJoin: "round",
               }}
@@ -552,7 +625,7 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
             <MapLibreGL.LineLayer
               id="route-main"
               style={{
-                lineWidth: 8,
+                lineWidth: highContrast ? 10 : 8,
                 lineColor: ["get", "color"],
                 lineOpacity: 0.98,
                 lineCap: "round",
@@ -563,82 +636,103 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
         ) : null}
       </MapLibreGL.MapView>
 
-      {!routeActive && !detailsOpen ? (
-        <View style={[styles.mapModeWrap, { top: insets.top + 10 }]}>
-          <View style={styles.mapModePill}>
-            <Pressable
-              onPress={() => setDestinationMode(false)}
-              style={[styles.mapModeBtn, !isSelectingOnMap && styles.mapModeBtnActive]}
-              hitSlop={10}
-            >
-              <Text style={[styles.mapModeBtnText, !isSelectingOnMap && styles.mapModeBtnTextActive]}>
-                Destinos
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setDestinationMode(true)}
-              style={[styles.mapModeBtn, isSelectingOnMap && styles.mapModeBtnActive]}
-              hitSlop={10}
-            >
-              <Text style={[styles.mapModeBtnText, isSelectingOnMap && styles.mapModeBtnTextActive]}>
-                Selecionar no mapa
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
       {/* Centrar */}
       {userCoord ? (
         <Pressable
           onPress={centerBtnPress}
-          style={[styles.centerBtn, { top: insets.top + 82 }]}
+          style={[
+            styles.centerBtn,
+            {
+              top: insets.top + 82,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
           accessibilityLabel={t("a11y.map_center_user")}
         >
-          <IconCenter />
+          <IconCenter color={colors.text} accent={colors.accent} />
         </Pressable>
       ) : null}
 
       {/* Botão filtros */}
-      {!routeActive && !detailsOpen && !isSelectingOnMap && categories.length > 1 ? (
+      {!routeActive && !detailsOpen && categories.length > 1 ? (
         <>
           <Pressable
-             style={[styles.filterIconBtn, { top: insets.top + 82 }]}
+             style={[
+               styles.filterIconBtn,
+               {
+                 top: insets.top + 82,
+                 backgroundColor: colors.surface,
+                 borderColor: colors.border,
+               },
+             ]}
             onPress={() => setFilterOpen(true)}
             accessibilityLabel={t("a11y.map_open_filters")}
           >
-            <IconFilters size={22} />
+            <IconFilters size={22} color={colors.text} accent={colors.accent} />
 
             {selectedCatIds.length ? (
-              <View style={styles.filterIconBadge}>
-                <Text style={styles.filterIconBadgeText}>{selectedCatIds.length}</Text>
+              <View
+                style={[
+                  styles.filterIconBadge,
+                  {
+                    backgroundColor: colors.accent,
+                    borderColor: colors.surface,
+                  },
+                ]}
+              >
+                <Text style={[styles.filterIconBadgeText, { color: colors.accentText }]}>
+                  {selectedCatIds.length}
+                </Text>
               </View>
             ) : null}
           </Pressable>
 
-          <Modal visible={filterOpen} transparent animationType="slide" onRequestClose={() => setFilterOpen(false)}>
-            <Pressable style={styles.modalBackdrop} onPress={() => setFilterOpen(false)} />
+          <Modal
+            visible={filterOpen}
+            transparent
+            animationType={getModalAnimationType(reduceMotion, "slide")}
+            onRequestClose={() => setFilterOpen(false)}
+          >
+            <Pressable
+              style={[styles.modalBackdrop, { backgroundColor: colors.overlay }]}
+              onPress={() => setFilterOpen(false)}
+            />
 
-            <View style={[styles.filterSheet, { paddingBottom: insets.bottom + tabBarH + 12 }]}>
-              <View style={styles.sheetHandle} />
+            <View
+              style={[
+                styles.filterSheet,
+                {
+                  paddingBottom: insets.bottom + tabBarH + 12,
+                  backgroundColor: colors.bg,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
 
               <View style={styles.filterHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.filterTitle}>{t("map.filter_sheet_title")}</Text>
-                  <Text style={styles.filterSubtitle}>
+                  <Text style={[styles.filterTitle, { color: colors.text }]}>{t("map.filter_sheet_title")}</Text>
+                  <Text style={[styles.filterSubtitle, { color: colors.muted }]}>
                     {selectedCatIds.length
                       ? t("map.summary_selected", { selected: selectedCatIds.length, visible: filteredPois.length })
                       : t("map.summary_points_visible", { count: filteredPois.length })}
                   </Text>
                 </View>
 
-                <Pressable onPress={() => setSelectedCatIds([])} style={styles.btnGhost}>
-                  <Text style={styles.btnGhostText}>{t("common.clear")}</Text>
+                <Pressable
+                  onPress={() => setSelectedCatIds([])}
+                  style={[styles.btnGhost, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
+                  <Text style={[styles.btnGhostText, { color: colors.accentStrong }]}>{t("common.clear")}</Text>
                 </Pressable>
 
-                <Pressable onPress={() => setFilterOpen(false)} style={styles.btnPrimary}>
-                  <View style={styles.btnPrimaryDot} />
+                <Pressable
+                  onPress={() => setFilterOpen(false)}
+                  style={[styles.btnPrimary, { backgroundColor: colors.accentStrong }]}
+                >
+                  <View style={[styles.btnPrimaryDot, { backgroundColor: colors.accent }]} />
                   <Text style={styles.btnPrimaryText}>{t("common.done")}</Text>
                 </Pressable>
               </View>
@@ -647,6 +741,10 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
                     onPress={() => setShowStreetAccessibility((prev) => !prev)}
                     style={[
                       styles.freeNavCard,
+                      {
+                        backgroundColor: colors.surface,
+                        borderColor: colors.border,
+                      },
                       showStreetAccessibility && styles.freeNavCardActive,
                     ]}
                   >
@@ -654,26 +752,29 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
                       <Text
                         style={[
                           styles.freeNavTitle,
+                          { color: colors.text },
                           showStreetAccessibility && styles.freeNavTitleActive,
                         ]}
                       >
-                        Mostrar acessibilidade das ruas
+                        {t("map.show_street_accessibility")}
                       </Text>
 
-                      <Text style={styles.freeNavSubtitle}>
-                        Rede pedestre perto da tua posição atual
+                      <Text style={[styles.freeNavSubtitle, { color: colors.muted }]}>
+                        {t("map.street_network_nearby")}
                       </Text>
                     </View>
 
                     <View
                       style={[
                         styles.freeNavSwitch,
+                        { backgroundColor: highContrast ? colors.surfaceAlt : "rgba(11,45,77,0.12)" },
                         showStreetAccessibility && styles.freeNavSwitchActive,
                       ]}
                     >
                       <View
                         style={[
                           styles.freeNavSwitchKnob,
+                          { backgroundColor: colors.surface },
                           showStreetAccessibility && styles.freeNavSwitchKnobActive,
                         ]}
                       />
@@ -689,22 +790,52 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
                     <Pressable
                       key={c.id}
                       onPress={() => toggleCat(c.id)}
-                      style={[styles.catCard, active && styles.catCardActive]}
+                      style={[
+                        styles.catCard,
+                        {
+                          backgroundColor: colors.surface,
+                          borderColor: colors.border,
+                        },
+                        active && styles.catCardActive,
+                      ]}
                     >
-                      <View style={[styles.catIconWrap, active && styles.catIconWrapActive]}>
+                      <View
+                        style={[
+                          styles.catIconWrap,
+                          { backgroundColor: colors.surfaceAlt },
+                          active && styles.catIconWrapActive,
+                        ]}
+                      >
                         <PoiSvgIcon
                           name={iconName}
                           size={16}
-                          color={active ? "#1579B3" : "rgba(5,31,65,0.85)"}
+                          color={active ? colors.accentStrong : colors.text}
                         />
                       </View>
 
-                      <Text numberOfLines={2} style={[styles.catName, active && styles.catNameActive]}>
+                      <Text
+                        numberOfLines={2}
+                        style={[styles.catName, { color: colors.text }, active && styles.catNameActive]}
+                      >
                         {t(`categories.${c.key}`, { defaultValue: c.name })}
                       </Text>
 
-                      <View style={[styles.catCountPill, active && styles.catCountPillActive]}>
-                        <Text style={[styles.catCountText, active && styles.catCountTextActive]}>{c.count}</Text>
+                      <View
+                        style={[
+                          styles.catCountPill,
+                          { backgroundColor: colors.surfaceAlt },
+                          active && styles.catCountPillActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.catCountText,
+                            { color: colors.text },
+                            active && styles.catCountTextActive,
+                          ]}
+                        >
+                          {c.count}
+                        </Text>
                       </View>
 
                       {active ? <View style={styles.catCheck} /> : null}
@@ -718,25 +849,59 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
       ) : null}
 
       {mapErrorMessage ? (
-        <View style={[styles.errorBanner, { top: insets.top + 140 }]}>
-          <Text style={styles.errorBannerText}>{mapErrorMessage}</Text>
+        <View
+          style={[
+            styles.errorBanner,
+            {
+              top: insets.top + 140,
+              backgroundColor: colors.dangerBg,
+              borderColor: colors.dangerBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.errorBannerText, { color: colors.dangerText }]}>{mapErrorMessage}</Text>
         </View>
       ) : null}
 
       {/* Pill detalhes rota */}
       {routeActive && !navSheetOpen ? (
         <Pressable
-          style={[styles.routePill, { bottom: tabBarH + 18 }]}
+          style={[
+            styles.routePill,
+            {
+              bottom: tabBarH + 18,
+              backgroundColor: highContrast ? colors.text : "#051F41",
+              borderColor: highContrast ? colors.border : "rgba(21,121,179,0.45)",
+            },
+          ]}
           onPress={openNavigationSheet}
           accessibilityLabel={t("a11y.map_open_route_details")}
         >
-          <View style={styles.routePillBadge} />
-          <Text style={styles.routePillText}>{t("map.route_details")}</Text>
+          <View
+            style={[
+              styles.routePillBadge,
+              { backgroundColor: highContrast ? colors.surface : "#F09C1F" },
+            ]}
+          />
+          <Text
+            style={[
+              styles.routePillText,
+              { color: highContrast ? colors.surface : "#FFFFFF" },
+            ]}
+          >
+            {t("map.route_details")}
+          </Text>
         </Pressable>
       ) : null}
 
-      {!routeActive && !detailsOpen && !isSelectingOnMap ? (
-        <ExploreSearchPanel bottomOffset={tabBarH + 10} onPickDestination={pickDestination} />
+      {!routeActive && !detailsOpen ? (
+        <ExploreSearchPanel
+          bottomOffset={tabBarH + 10}
+          onPickDestination={pickDestination}
+          reduceMotion={reduceMotion}
+          highContrast={highContrast}
+          userCoord={userCoord}
+        />
       ) : null}
 
       <PoiDetailsSheet
@@ -749,15 +914,25 @@ const nearbyStreetAccessibilityShape = useMemo(() => {
       <Modal
           visible={isCalculatingRoute}
           transparent
-          animationType="fade"
+          animationType={getModalAnimationType(reduceMotion, "fade")}
           statusBarTranslucent
         >
           <View style={styles.routeLoadingBackdrop}>
-            <View style={styles.routeLoadingCard}>
-              <RouteLoadingDots />
-              <Text style={styles.routeLoadingTitle}>A calcular a rota</Text>
-              <Text style={styles.routeLoadingText}>
-                {routeCalculationMessage || "A calcular a melhor rota para si"}
+            <View
+              style={[
+                styles.routeLoadingCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <RouteLoadingDots reduceMotion={reduceMotion} highContrast={highContrast} />
+              <Text style={[styles.routeLoadingTitle, { color: colors.text }]}>
+                {t("map.route_loading_title")}
+              </Text>
+              <Text style={[styles.routeLoadingText, { color: colors.muted }]}>
+                {routeCalculationMessage || t("map.route_loading_default")}
               </Text>
             </View>
           </View>
@@ -1069,48 +1244,6 @@ filterIconBtn: {
   },
   routePillBadge: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#F09C1F", marginRight: 10 },
   routePillText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
-mapModeWrap: {
-  position: "absolute",
-  alignSelf: "center",
-  zIndex: 140,
-  elevation: 24,
-},
-
-mapModePill: {
-  flexDirection: "row",
-  backgroundColor: "rgba(246,247,249,0.97)",
-  borderRadius: 18,
-  padding: 4,
-  borderWidth: 1,
-  borderColor: "rgba(11,45,77,0.08)",
-  shadowColor: "#000",
-  shadowOpacity: 0.1,
-  shadowRadius: 10,
-  shadowOffset: { width: 0, height: 4 },
-},
-
-mapModeBtn: {
-  minWidth: 126,
-  height: 36,
-  borderRadius: 14,
-  alignItems: "center",
-  justifyContent: "center",
-  paddingHorizontal: 12,
-},
-
-mapModeBtnActive: {
-  backgroundColor: "#051F41",
-},
-
-mapModeBtnText: {
-  fontSize: 13,
-  fontWeight: "900",
-  color: "#6B7A88",
-},
-
-mapModeBtnTextActive: {
-  color: "#FFFFFF",
-},
 
 freeNavCard: {
   marginBottom: 12,

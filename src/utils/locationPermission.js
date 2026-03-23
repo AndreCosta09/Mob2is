@@ -1,9 +1,10 @@
 import { PermissionsAndroid, Platform } from "react-native";
 import Geolocation from "react-native-geolocation-service";
 
+import i18n from "../i18n";
 
 export const DEV_STATIC_LOCATION_ENABLED = true;
-export const DEV_STATIC_LOCATION_COORDS = [-8.841553, 41.692801 ];
+export const DEV_STATIC_LOCATION_COORDS = [-8.841553, 41.692801];
 
 export function shouldUseDevStaticLocation() {
   return __DEV__ && DEV_STATIC_LOCATION_ENABLED;
@@ -31,10 +32,10 @@ export async function resolveLocationPermission({ prompt = true } = {}) {
   }
 
   const status = await PermissionsAndroid.request(fineLocation, {
-    title: "Permitir localização",
-    message: "A Mob2is precisa da sua localização para disponibilizar as funcionalidades da app.",
-    buttonPositive: "Permitir",
-    buttonNegative: "Recusar",
+    title: i18n.t("locationBlocked.badge"),
+    message: i18n.t("routeFlow.permission_required_message"),
+    buttonPositive: i18n.t("common.ok"),
+    buttonNegative: i18n.t("common.cancel"),
   });
 
   return status === PermissionsAndroid.RESULTS.GRANTED ? "granted" : "denied";
