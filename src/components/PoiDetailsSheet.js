@@ -44,6 +44,7 @@ export default function PoiDetailsSheet({
   }, [visible, collapsedHeight]);
 
   const heroImage = useMemo(() => {
+    if (poi?.isCustomPoint) return null;
     if (poi?.images?.length) return poi.images[0];
     if (poi?.image) return poi.image;
     const id = poi?.id ?? 1;
@@ -106,9 +107,12 @@ export default function PoiDetailsSheet({
 
   const title = poi.title ?? t("poiDetails.fallback_title");
   const subtitle = poi.subtitle ?? t("poiDetails.fallback_subtitle");
-  const eta = poi.etaText ?? t("poiDetails.fallback_eta");
-  const distance = poi.distanceText ?? "2,4 km";
+  const eta = poi?.isCustomPoint
+    ? t("navigation.eta_unknown")
+    : poi.etaText ?? t("poiDetails.fallback_eta");
+  const distance = poi?.isCustomPoint ? "" : poi.distanceText ?? "2,4 km";
   const shortDesc =
+    poi.notice ??
     poi.shortDescription ??
     poi.description ??
     t("poiDetails.fallback_description");
@@ -161,12 +165,14 @@ export default function PoiDetailsSheet({
               {subtitle}
             </Text>
 
-            <View style={styles.heroWrap}>
-              <Image
-                source={{ uri: heroImage }}
-                style={[styles.heroImg, !expanded && styles.heroImgCollapsed]}
-              />
-            </View>
+            {heroImage ? (
+              <View style={styles.heroWrap}>
+                <Image
+                  source={{ uri: heroImage }}
+                  style={[styles.heroImg, !expanded && styles.heroImgCollapsed]}
+                />
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.metaRow}>

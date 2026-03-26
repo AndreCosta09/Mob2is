@@ -61,6 +61,15 @@ export function UserProvider({ children }) {
     }
   };
 
+  const clearCondition = async () => {
+    try {
+      await AsyncStorage.removeItem(KEY_CONDITION);
+      setCondition(null);
+    } catch (error) {
+      console.error("clearCondition error:", error);
+    }
+  };
+
   const saveRoutePreference = async (nextRoutePreference) => {
     const normalized = normalizeRoutePreference(nextRoutePreference);
 
@@ -103,6 +112,7 @@ export function UserProvider({ children }) {
         preferences,
         loading,
         saveCondition,
+        clearCondition,
         saveRoutePreference,
         savePreferences,
         updatePreference,

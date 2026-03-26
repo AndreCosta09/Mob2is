@@ -259,6 +259,7 @@ export default function MapScreen({ route, navigation }) {
   const tabBarH = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
   const cameraRef = useRef(null);
+  const poiSourceRef = useRef(null);
   const { condition, routePreference, preferences } = useContext(UserContext) ?? {};
   const { t } = useTranslation();
   const reduceMotion = !!preferences?.reduceMotion;
@@ -268,10 +269,11 @@ export default function MapScreen({ route, navigation }) {
   const [pois, setPois] = useState([]);
   const [selectedCatIds, setSelectedCatIds] = useState([]);
   const [filterOpen, setFilterOpen] = useState(false);
-  const [showStreetAccessibility, setShowStreetAccessibility] = useState(false);
+  const [showStreetAccessibility] = useState(false);
   const [poisErrorMessage, setPoisErrorMessage] = useState("");
   const [mapStyleLoaded, setMapStyleLoaded] = useState(false);
   const [poiRenderVersion, setPoiRenderVersion] = useState(0);
+  const [mapZoomLevel, setMapZoomLevel] = useState(15);
 
 
   const nav = useRouteNavigation({
@@ -304,13 +306,14 @@ export default function MapScreen({ route, navigation }) {
       setDetailsOpen,
       pickDestination,
       startNavigation,
-      previewPerfil,
-      confirmStartFollow,
-      openNavigationSheet,
-      closeNavigationSheet,
-      clearRoute,
-      centerBtnPress,
-    } = nav;
+       previewPerfil,
+       confirmStartFollow,
+       openNavigationSheet,
+       closeNavigationSheet,
+       clearRoute,
+       centerBtnPress,
+       cancelRouteCalculation,
+     } = nav;
 
 
 
@@ -336,6 +339,29 @@ export default function MapScreen({ route, navigation }) {
     const s = new Set(selectedCatIds);
     return (pois ?? []).filter((p) => s.has(p.categoryId));
   }, [pois, selectedCatIds]);
+
+  const poiShape = useMemo(() => {
+    const features = (filteredPois ?? [])
+      .filter((poi) => Array.isArray(poi?.coords) && poi?.id !== selectedPoi?.id)
+      .map((poi) => ({
+        type: "Feature",
+        properties: {
+          id: String(poi.id),
+          title: poi.title ?? "",
+        },
+        geometry: {
+          type: "Point",
+          coordinates: poi.coords,
+        },
+      }));
+
+    return {
+      type: "FeatureCollection",
+      features,
+    };
+  }, [filteredPois, selectedPoi]);
+
+  const showClusteredPois = mapZoomLevel < 14.75;
 
   const toggleCat = (id) => {
     setSelectedCatIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -415,12 +441,16 @@ function buildCustomDestinationPoi([lng, lat], t) {
       lat: lat.toFixed(6),
       lng: lng.toFixed(6),
     }),
+    shortDescription: t("map.custom_destination_notice"),
+    notice: t("map.custom_destination_notice"),
     routeSummary: t("map.custom_route_summary"),
     trafficSummary: t("map.custom_traffic_summary"),
     image: null,
     rating: null,
     phone: null,
     visits: 0,
+    etaText: t("navigation.eta_unknown"),
+    distanceText: "",
   };
 }
 
@@ -463,6 +493,42 @@ function handleMapPress(event) {
   pickDestination(customPoi);
 }
 
+async function handlePoiSourcePress(event) {
+  const feature = event?.features?.[0];
+  if (!feature) return;
+
+  if (feature?.properties?.cluster) {
+    try {
+      const zoom = await poiSourceRef.current?.getClusterExpansionZoom(feature);
+      const coords = feature?.geometry?.coordinates;
+      if (Array.isArray(coords) && coords.length >= 2 && Number.isFinite(zoom)) {
+        cameraRef.current?.setCamera?.({
+          centerCoordinate: coords,
+          zoomLevel: Math.max(zoom, mapZoomLevel + 0.8),
+          animationMode: "easeTo",
+          animationDuration: reduceMotion ? 0 : 320,
+        });
+      }
+    } catch (error) {
+      console.warn("[Mob2is] cluster expansion error:", error);
+    }
+    return;
+  }
+
+  const poiId = String(feature?.properties?.id ?? "");
+  const poi = (filteredPois ?? []).find((item) => String(item?.id) === poiId);
+  if (poi) {
+    pickDestination(poi);
+  }
+}
+
+function handleRegionDidChange(feature) {
+  const nextZoom = Number(feature?.properties?.zoomLevel);
+  if (Number.isFinite(nextZoom)) {
+    setMapZoomLevel(nextZoom);
+  }
+}
+
 const nearbyStreetAccessibilityShape = useMemo(() => {
   if (!showStreetAccessibility || !userCoord || routeActive) {
     return { type: "FeatureCollection", features: [] };
@@ -496,6 +562,7 @@ useEffect(() => {
         surfaceView={true}
         onPress={handleMapPress}
         onDidFinishLoadingStyle={() => setMapStyleLoaded(true)}
+        onRegionDidChange={handleRegionDidChange}
       >
         <MapLibreGL.Camera
           ref={cameraRef}
@@ -531,7 +598,58 @@ useEffect(() => {
         </MapLibreGL.ShapeSource>
 
        {/* POIs */}
-        {mapStyleLoaded &&
+        {!routeActive && showClusteredPois && poiShape?.features?.length ? (
+          <MapLibreGL.ShapeSource
+            ref={poiSourceRef}
+            id="pois-clustered"
+            shape={poiShape}
+            cluster
+            clusterRadius={42}
+            clusterMinPoints={2}
+            clusterMaxZoomLevel={14}
+            onPress={handlePoiSourcePress}
+          >
+            <MapLibreGL.CircleLayer
+              id="poi-cluster-bubbles"
+              filter={["has", "point_count"]}
+              style={{
+                circleRadius: [
+                  "step",
+                  ["get", "point_count"],
+                  18,
+                  10,
+                  22,
+                  25,
+                  26,
+                ],
+                circleColor: highContrast ? colors.text : colors.accentStrong,
+                circleStrokeColor: colors.surface,
+                circleStrokeWidth: highContrast ? 3 : 2,
+              }}
+            />
+            <MapLibreGL.SymbolLayer
+              id="poi-cluster-count"
+              filter={["has", "point_count"]}
+              style={{
+                textField: ["get", "point_count_abbreviated"],
+                textSize: 12,
+                textColor: colors.surface,
+              }}
+            />
+            <MapLibreGL.CircleLayer
+              id="poi-unclustered-dots"
+              filter={["!", ["has", "point_count"]]}
+              style={{
+                circleRadius: highContrast ? 7 : 6,
+                circleColor: colors.surface,
+                circleStrokeColor: highContrast ? colors.border : colors.accentStrong,
+                circleStrokeWidth: highContrast ? 3 : 2,
+              }}
+            />
+          </MapLibreGL.ShapeSource>
+        ) : null}
+
+        {mapStyleLoaded && !routeActive && !showClusteredPois &&
           (filteredPois ?? [])
           .filter((p) => Array.isArray(p?.coords) && p?.id !== selectedPoi?.id)
           .map((p) => (
@@ -542,6 +660,7 @@ useEffect(() => {
               onSelected={() => pickDestination(p)}
             >
               <View
+                collapsable={false}
                 style={[
                   styles.poiMarker,
                   {
@@ -615,7 +734,7 @@ useEffect(() => {
             <MapLibreGL.LineLayer
               id="route-shadow"
               style={{
-                lineWidth: highContrast ? 13 : 11,
+                lineWidth: following ? (highContrast ? 12 : 10) : highContrast ? 10 : 8,
                 lineColor: "#000000",
                 lineOpacity: highContrast ? 0.24 : 0.14,
                 lineCap: "round",
@@ -625,7 +744,7 @@ useEffect(() => {
             <MapLibreGL.LineLayer
               id="route-main"
               style={{
-                lineWidth: highContrast ? 10 : 8,
+                lineWidth: following ? (highContrast ? 9 : 7) : highContrast ? 7 : 5,
                 lineColor: ["get", "color"],
                 lineOpacity: 0.98,
                 lineCap: "round",
@@ -643,7 +762,7 @@ useEffect(() => {
           style={[
             styles.centerBtn,
             {
-              top: insets.top + 82,
+              top: insets.top + 62,
               backgroundColor: colors.surface,
               borderColor: colors.border,
             },
@@ -661,10 +780,10 @@ useEffect(() => {
              style={[
                styles.filterIconBtn,
                {
-                 top: insets.top + 82,
-                 backgroundColor: colors.surface,
-                 borderColor: colors.border,
-               },
+                  top: insets.top + 62,
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
              ]}
             onPress={() => setFilterOpen(true)}
             accessibilityLabel={t("a11y.map_open_filters")}
@@ -736,51 +855,6 @@ useEffect(() => {
                   <Text style={styles.btnPrimaryText}>{t("common.done")}</Text>
                 </Pressable>
               </View>
-               
-              <Pressable
-                    onPress={() => setShowStreetAccessibility((prev) => !prev)}
-                    style={[
-                      styles.freeNavCard,
-                      {
-                        backgroundColor: colors.surface,
-                        borderColor: colors.border,
-                      },
-                      showStreetAccessibility && styles.freeNavCardActive,
-                    ]}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.freeNavTitle,
-                          { color: colors.text },
-                          showStreetAccessibility && styles.freeNavTitleActive,
-                        ]}
-                      >
-                        {t("map.show_street_accessibility")}
-                      </Text>
-
-                      <Text style={[styles.freeNavSubtitle, { color: colors.muted }]}>
-                        {t("map.street_network_nearby")}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={[
-                        styles.freeNavSwitch,
-                        { backgroundColor: highContrast ? colors.surfaceAlt : "rgba(11,45,77,0.12)" },
-                        showStreetAccessibility && styles.freeNavSwitchActive,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.freeNavSwitchKnob,
-                          { backgroundColor: colors.surface },
-                          showStreetAccessibility && styles.freeNavSwitchKnobActive,
-                        ]}
-                      />
-                    </View>
-                  </Pressable> 
-
               <ScrollView contentContainerStyle={styles.filterGrid} showsVerticalScrollIndicator={false}>
                 {categories.map((c) => {
                   const active = selectedCatIds.includes(c.id);
@@ -889,7 +963,7 @@ useEffect(() => {
               { color: highContrast ? colors.surface : "#FFFFFF" },
             ]}
           >
-            {t("map.route_details")}
+            {following ? t("navigation.navigating") : t("map.route_details")}
           </Text>
         </Pressable>
       ) : null}
@@ -918,6 +992,7 @@ useEffect(() => {
           statusBarTranslucent
         >
           <View style={styles.routeLoadingBackdrop}>
+            <Pressable style={StyleSheet.absoluteFillObject} onPress={cancelRouteCalculation} />
             <View
               style={[
                 styles.routeLoadingCard,
@@ -934,6 +1009,21 @@ useEffect(() => {
               <Text style={[styles.routeLoadingText, { color: colors.muted }]}>
                 {routeCalculationMessage || t("map.route_loading_default")}
               </Text>
+
+              <Pressable
+                onPress={cancelRouteCalculation}
+                style={[
+                  styles.routeLoadingCancelBtn,
+                  {
+                    backgroundColor: colors.surfaceAlt,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.routeLoadingCancelText, { color: colors.text }]}>
+                  {t("common.cancel")}
+                </Text>
+              </Pressable>
             </View>
           </View>
         </Modal>
@@ -1016,6 +1106,20 @@ routeLoadingText: {
   fontWeight: "700",
   color: "rgba(5,31,65,0.68)",
   textAlign: "center",
+},
+routeLoadingCancelBtn: {
+  marginTop: 16,
+  minWidth: 108,
+  minHeight: 40,
+  paddingHorizontal: 16,
+  borderRadius: 14,
+  borderWidth: 1,
+  alignItems: "center",
+  justifyContent: "center",
+},
+routeLoadingCancelText: {
+  fontSize: 13,
+  fontWeight: "900",
 },
   page: { flex: 1 },
   map: { flex: 1 },

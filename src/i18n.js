@@ -125,6 +125,7 @@ i18n.use(initReactI18next).init({
           destination: "Destino",
           eta: "Tempo estimado: {{min}} min",
           eta_unknown: "Tempo estimado: - min",
+          eta_value: "Tempo estimado: {{value}}",
           following_hint: "A navegar e a seguir a tua localizacao",
           route_via_default: "Via R. de S. Vicente, Av. Cap. Gaspar de Castro",
           traffic_default: "Melhor rota, transito habitual",
@@ -171,6 +172,8 @@ i18n.use(initReactI18next).init({
           custom_destination_title: "Destino selecionado no mapa",
           custom_destination_description:
             "Ponto selecionado manualmente no mapa ({{lat}}, {{lng}}).",
+          custom_destination_notice:
+            "Tenha em consideracao que as classificacoes de acessibilidade podem nao estar disponiveis para o ponto selecionado.",
           custom_route_summary: "Destino personalizado",
           custom_traffic_summary: "Selecionado no mapa",
           show_street_accessibility: "Mostrar acessibilidade das ruas",
@@ -199,6 +202,8 @@ i18n.use(initReactI18next).init({
           confirm_condition_title: "Deseja alterar a sua condicao?",
           confirm_condition_message:
             "Esta condicao passara a ser usada por defeito nos proximos calculos de rota.",
+          change_condition_redirect:
+            "Vai ser reencaminhado para o ecran inicial para escolher uma nova condicao.",
           confirm_condition_cancel: "Cancelar",
           confirm_condition_confirm: "Alterar",
           preferences: {
@@ -376,6 +381,7 @@ i18n.use(initReactI18next).init({
           destination: "Destination",
           eta: "Estimated time: {{min}} min",
           eta_unknown: "Estimated time: - min",
+          eta_value: "Estimated time: {{value}}",
           following_hint: "Navigating and following your location",
           route_via_default: "Via R. de S. Vicente, Av. Cap. Gaspar de Castro",
           traffic_default: "Best route, usual traffic",
@@ -422,6 +428,8 @@ i18n.use(initReactI18next).init({
           custom_destination_title: "Destination selected on the map",
           custom_destination_description:
             "Point manually selected on the map ({{lat}}, {{lng}}).",
+          custom_destination_notice:
+            "Please note that accessibility ratings may not be available for the selected point.",
           custom_route_summary: "Custom destination",
           custom_traffic_summary: "Selected on the map",
           show_street_accessibility: "Show street accessibility",
@@ -450,6 +458,8 @@ i18n.use(initReactI18next).init({
           confirm_condition_title: "Do you want to change your condition?",
           confirm_condition_message:
             "This condition will be used by default in future route calculations.",
+          change_condition_redirect:
+            "You will be redirected to the initial screen to choose a new condition.",
           confirm_condition_cancel: "Cancel",
           confirm_condition_confirm: "Change",
           preferences: {

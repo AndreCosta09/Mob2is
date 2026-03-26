@@ -35,6 +35,24 @@ function normalizePreferredPerfil(value) {
     : "equilibrada";
 }
 
+function formatDurationCompact(value) {
+  const totalMinutes = Math.round(Number(value));
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return null;
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!minutes) return `${hours} h`;
+  return `${hours} h ${String(minutes).padStart(2, "0")} min`;
+}
+
+function formatDistanceText(valueMeters) {
+  const totalMeters = Math.round(Number(valueMeters));
+  if (!Number.isFinite(totalMeters) || totalMeters <= 0) return "";
+  if (totalMeters < 1000) return `${totalMeters} m`;
+  return `${(totalMeters / 1000).toFixed(1).replace(".", ",")} km`;
+}
+
 function resolvePoiEnd(poi) {
   const graphPointId = poi?.graphPointId;
   if (graphPointId !== null && graphPointId !== undefined && String(graphPointId).trim() !== "") {
@@ -160,6 +178,9 @@ export default function useRouteNavigation({
     activePerfilRef.current = activePerfil;
   }, [activePerfil]);
 
+  const routeCalculationRequestRef = useRef(0);
+  const poiPreviewRequestRef = useRef(0);
+
   const [navMode, setNavMode] = useState("idle");
   const navModeRef = useRef("idle");
   useEffect(() => {
@@ -210,6 +231,37 @@ export default function useRouteNavigation({
     if (routeActive) return;
     setSelectedPerfil(normalizePreferredPerfil(routePreference));
   }, [routeActive, routePreference]);
+
+  useEffect(() => {
+    if (!apiErrorMessage) return undefined;
+
+    const timeoutId = setTimeout(() => {
+      setApiErrorMessage("");
+    }, 5500);
+
+    return () => clearTimeout(timeoutId);
+  }, [apiErrorMessage]);
+
+  const beginRouteCalculationRequest = () => {
+    const nextId = routeCalculationRequestRef.current + 1;
+    routeCalculationRequestRef.current = nextId;
+    return nextId;
+  };
+
+  const isRouteCalculationRequestActive = (requestId) =>
+    routeCalculationRequestRef.current === requestId;
+
+  const cancelRouteCalculation = () => {
+    routeCalculationRequestRef.current += 1;
+    poiPreviewRequestRef.current += 1;
+    routeInFlightRef.current = false;
+    setIsCalculatingRoute(false);
+    setRouteCalculationMessage(t("routeFlow.calculating_route"));
+    setApiErrorMessage("");
+    setNavSheetOpen(false);
+    setRouteActive(false);
+    setDetailsOpen(true);
+  };
 
   const setCam = (opts) => {
     if (!cameraRef?.current?.setCamera) return;
@@ -626,8 +678,24 @@ export default function useRouteNavigation({
   }, [t]);
 
   const pickDestination = (poi) => {
-    setSelectedPoi(poi);
+    poiPreviewRequestRef.current += 1;
+    setSelectedPoi(
+      poi?.isCustomPoint
+        ? {
+            ...poi,
+            routePreviewLoaded: true,
+            routePreviewLoading: false,
+          }
+        : {
+            ...poi,
+            etaText: userCoord ? t("common.loading") : poi?.etaText,
+            distanceText: userCoord ? "" : poi?.distanceText,
+            routePreviewLoaded: false,
+            routePreviewLoading: false,
+          }
+    );
     setDetailsOpen(true);
+    setApiErrorMessage("");
 
     setRouteActive(false);
     setNavSheetOpen(false);
@@ -663,10 +731,98 @@ export default function useRouteNavigation({
     }
   };
 
+  useEffect(() => {
+    if (routeActive || !detailsOpen || !selectedPoi?.coords || selectedPoi?.isCustomPoint || !userCoord) {
+      return;
+    }
+
+    if (selectedPoi?.routePreviewLoaded || selectedPoi?.routePreviewLoading) {
+      return;
+    }
+
+    const requestId = poiPreviewRequestRef.current + 1;
+    poiPreviewRequestRef.current = requestId;
+    const poiId = String(selectedPoi.id);
+
+    setSelectedPoi((current) => {
+      if (!current || String(current.id) !== poiId) return current;
+      return {
+        ...current,
+        routePreviewLoading: true,
+        etaText: current.etaText || t("common.loading"),
+      };
+    });
+
+    (async () => {
+      try {
+        const incapacidade = mapConditionToIncapacidade(conditionRef.current);
+        const [lng, lat] = userCoord;
+        const [lngE, latE] = selectedPoi.coords;
+        const preferredPerfil = normalizePreferredPerfil(routePreferenceRef.current);
+        const end = resolvePoiEnd(selectedPoi);
+
+        if (end == null) {
+          throw new Error("POI sem identificador de destino valido.");
+        }
+
+        const resp = await calculateRouteMultiObjective({
+          incapacidade,
+          end,
+          lati: lat,
+          longi: lng,
+          latE,
+          lngE,
+          perfil: preferredPerfil,
+        });
+
+        if (poiPreviewRequestRef.current !== requestId) return;
+
+        const rotas = Array.isArray(resp?.rotas) ? resp.rotas : [resp].filter(Boolean);
+        const previewRoute =
+          rotas.find((item) => item?.perfil === preferredPerfil) ||
+          rotas.find((item) => item?.perfil === "equilibrada") ||
+          rotas[0];
+
+        const etaValue =
+          Number(previewRoute?.estimated_time_min) > 0
+            ? t("navigation.eta_value", {
+                value: formatDurationCompact(previewRoute.estimated_time_min),
+              })
+            : t("poiDetails.fallback_eta");
+        const distanceValue = formatDistanceText(previewRoute?.total_distance_m);
+
+        setSelectedPoi((current) => {
+          if (!current || String(current.id) !== poiId) return current;
+          return {
+            ...current,
+            etaText: etaValue,
+            distanceText: distanceValue,
+            routePreviewLoading: false,
+            routePreviewLoaded: true,
+          };
+        });
+      } catch (error) {
+        if (poiPreviewRequestRef.current !== requestId) return;
+
+        devWarn("[Mob2is] preview route summary error:", error);
+        setSelectedPoi((current) => {
+          if (!current || String(current.id) !== poiId) return current;
+          return {
+            ...current,
+            routePreviewLoading: false,
+            routePreviewLoaded: true,
+          };
+        });
+      }
+    })();
+  }, [detailsOpen, routeActive, selectedPoi, t, userCoord]);
+
   const openNavigationSheet = () => setNavSheetOpen(true);
   const closeNavigationSheet = () => setNavSheetOpen(false);
 
   const clearRoute = () => {
+    routeCalculationRequestRef.current += 1;
+    poiPreviewRequestRef.current += 1;
     setNavMode("idle");
     headingRef.current = 0;
     lastCoordRef.current = null;
@@ -686,6 +842,7 @@ export default function useRouteNavigation({
     setRouteOptions([]);
     setSelectedPerfil(routePreferenceRef.current);
     setActivePerfil(null);
+    setApiErrorMessage("");
 
     setDetailsOpen(false);
     setSelectedPoi(null);
@@ -761,6 +918,7 @@ export default function useRouteNavigation({
       return;
     }
 
+    const requestId = beginRouteCalculationRequest();
     setIsCalculatingRoute(true);
     setRouteCalculationMessage(t("routeFlow.checking_location"));
     setApiErrorMessage("");
@@ -773,6 +931,8 @@ export default function useRouteNavigation({
 
     try {
       const from = await ensureLocationForRoute();
+      if (!isRouteCalculationRequestActive(requestId)) return;
+
       if (!from) {
         setDetailsOpen(true);
         return;
@@ -796,6 +956,7 @@ export default function useRouteNavigation({
         lngE,
         perfil: null,
       });
+      if (!isRouteCalculationRequestActive(requestId)) return;
 
       devLog("[Mob2is] resposta final multi-rota", resp);
 
@@ -822,6 +983,7 @@ export default function useRouteNavigation({
       setSelectedPerfil(pick?.perfil ?? "equilibrada");
 
       const applied = await applyPathDataToMap(pick, { keepFollowing: false });
+      if (!isRouteCalculationRequestActive(requestId)) return;
 
       devLog("[Mob2is] applyPathDataToMap resultado", {
         applied,
@@ -838,13 +1000,17 @@ export default function useRouteNavigation({
       setApiErrorMessage("");
       setNavSheetOpen(true);
     } catch (e) {
+      if (!isRouteCalculationRequestActive(requestId)) return;
       console.warn("calculateRouteMultiObjective error:", e);
       setApiErrorMessage(getApiErrorMessage(e, t("api.cannot_calculate_route")));
       setRouteActive(false);
       setNavSheetOpen(false);
       setDetailsOpen(true);
     } finally {
-      setIsCalculatingRoute(false);
+      if (isRouteCalculationRequestActive(requestId)) {
+        setIsCalculatingRoute(false);
+        setRouteCalculationMessage(t("routeFlow.calculating_route"));
+      }
     }
   };
 
@@ -933,5 +1099,6 @@ export default function useRouteNavigation({
     closeNavigationSheet,
     clearRoute,
     centerBtnPress,
+    cancelRouteCalculation,
   };
 }

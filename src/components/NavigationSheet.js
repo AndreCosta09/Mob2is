@@ -9,7 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import Svg, { Path, Polyline } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
 
 const SHEET_HIDDEN_Y = 900;
@@ -68,6 +68,28 @@ function formatKm(value) {
   return `${n.toFixed(1).replace(".", ",")} km`;
 }
 
+function formatDurationCompact(value) {
+  const totalMinutes = Math.round(Number(value));
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) return "- min";
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!minutes) return `${hours} h`;
+  return `${hours} h ${String(minutes).padStart(2, "0")} min`;
+}
+
+function formatEtaLabel(value, t) {
+  const totalMinutes = Math.round(Number(value));
+  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
+    return t("navigation.eta_unknown");
+  }
+
+  return t("navigation.eta_value", {
+    value: formatDurationCompact(totalMinutes),
+  });
+}
+
 function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0%";
@@ -123,34 +145,6 @@ function IconChevron({ open = false, color = "#98A5B5", size = 16 }) {
   );
 }
 
-function IconSlope({ size = 18 }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 28 20" fill="none">
-      <Polyline
-        points="2,15 8,9 13,14 20,6 26,12"
-        stroke="#FFFFFF"
-        strokeWidth={2.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
-function IconSteps({ size = 18 }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 28 20" fill="none">
-      <Path
-        d="M3 15h7V9h7V4h8"
-        stroke="#FFFFFF"
-        strokeWidth={2.6}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Svg>
-  );
-}
-
 function DotsRow({ dots = [], muted = false }) {
   return (
     <View style={styles.dotsRow}>
@@ -169,24 +163,6 @@ function DotsRow({ dots = [], muted = false }) {
           />
         );
       })}
-    </View>
-  );
-}
-
-function MetricBadge({ type = "slope", value = "0%", muted = false }) {
-  return (
-    <View style={[styles.metricBadge, muted && styles.metricBadgeMuted]}>
-      <View
-        style={[
-          styles.metricBadgeIconWrap,
-          { backgroundColor: type === "slope" ? COLORS.purple : COLORS.blue },
-        ]}
-      >
-        {type === "slope" ? <IconSlope /> : <IconSteps />}
-      </View>
-      <View style={styles.metricBadgeValueWrap}>
-        <Text style={styles.metricBadgeValue}>{value}</Text>
-      </View>
     </View>
   );
 }
@@ -245,11 +221,9 @@ function RouteCard({
 
         <View style={styles.routeCenter}>
           <DotsRow dots={item.dots} muted={muted} />
-
-          <View style={styles.routeMetrics}>
-            <MetricBadge type="slope" value={item.slopePct} muted={muted} />
-            <MetricBadge type="steps" value={item.stepsPct} muted={muted} />
-          </View>
+          <Text style={[styles.routeEtaText, { color: selected ? COLORS.navy : COLORS.textMuted }]}>
+            {item.etaText}
+          </Text>
         </View>
 
         <Pressable onPress={onToggleExpand} hitSlop={10} style={styles.chevronBtn}>
@@ -262,16 +236,6 @@ function RouteCard({
           <LegendRow color={COLORS.green} value={item.highPct} text={item.legendHighText} />
           <LegendRow color={COLORS.yellow} value={item.mediumPct} text={item.legendMediumText} />
           <LegendRow color={COLORS.red} value={item.lowPct} text={item.legendLowText} />
-
-          <View style={styles.expandedMetricRow}>
-            <MetricBadge type="slope" value={item.slopePct} />
-            <Text style={styles.expandedMetricText}>{item.lowSlopeText}</Text>
-          </View>
-
-          <View style={styles.expandedMetricRow}>
-            <MetricBadge type="steps" value={item.stepsPct} />
-            <Text style={styles.expandedMetricText}>{item.lowStepsText}</Text>
-          </View>
         </View>
       ) : null}
     </View>
@@ -295,17 +259,40 @@ export default function NavigationSheet({
   const { height } = useWindowDimensions();
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [rendered, setRendered] = useState(active && open);
 
   useEffect(() => {
-    const target = !active || !open ? SHEET_HIDDEN_Y : 0;
-    Animated.spring(y, {
-      toValue: target,
-      damping: 24,
-      stiffness: 210,
-      mass: 1,
+    if (active && open) {
+      setRendered(true);
+      Animated.spring(y, {
+        toValue: 0,
+        damping: 24,
+        stiffness: 210,
+        mass: 1,
+        useNativeDriver: true,
+      }).start();
+      return undefined;
+    }
+
+    if (!rendered) {
+      y.setValue(SHEET_HIDDEN_Y);
+      return undefined;
+    }
+
+    const closeAnim = Animated.timing(y, {
+      toValue: SHEET_HIDDEN_Y,
+      duration: 220,
       useNativeDriver: true,
-    }).start();
-  }, [active, open, y]);
+    });
+
+    closeAnim.start(({ finished }) => {
+      if (finished && !(active && open)) {
+        setRendered(false);
+      }
+    });
+
+    return () => closeAnim.stop();
+  }, [active, open, rendered, y]);
 
   useEffect(() => {
     setExpanded(false);
@@ -365,20 +352,9 @@ export default function NavigationSheet({
         highPct: hasDynamicAccessSummary ? accessSummary.highPct : base.highPct,
         mediumPct: hasDynamicAccessSummary ? accessSummary.mediumPct : base.mediumPct,
         lowPct: hasDynamicAccessSummary ? accessSummary.lowPct : base.lowPct,
-        lowSlopeText: Number.isFinite(decliveValue)
-          ? t("navigation.avg_slope_route")
-          : perfil === "rapida"
-          ? t("navigation.moderate_slope")
-          : perfil === "equilibrada"
-          ? t("navigation.reduced_slope")
-          : t("navigation.low_accessibility_slope"),
-        lowStepsText: Number.isFinite(stepsValue)
-          ? t("navigation.route_with_stairs")
-          : perfil === "rapida"
-          ? t("navigation.uneven_relief")
-          : perfil === "equilibrada"
-          ? t("navigation.reduced_relief")
-          : t("navigation.low_accessibility_relief"),
+        etaText: formatDurationCompact(
+          Number(api?.estimated_time_min) > 0 ? Number(api.estimated_time_min) : etaMin || 0
+        ),
         legendHighText: t("navigation.legend_high"),
         legendMediumText: t("navigation.legend_medium"),
         legendLowText: t("navigation.legend_low"),
@@ -393,12 +369,13 @@ export default function NavigationSheet({
 
   const hasApiProfiles = availableProfiles.size > 0;
   const maxSheetHeight = Math.min(height * 0.62, height - 6);
+  const etaLabel = formatEtaLabel(selectedItem?.estimatedTimeMin || etaMin || 0, t);
 
-  if (!active || !poi) return null;
+  if (!rendered || !poi) return null;
 
   return (
     <Modal
-      visible={active && open}
+      visible={rendered}
       transparent
       animationType="none"
       statusBarTranslucent
@@ -421,24 +398,32 @@ export default function NavigationSheet({
 
           <View style={styles.headerRow}>
             <View style={styles.headerTextWrap}>
-              <View style={styles.kickerRow}>
-                <View style={styles.kickerDot} />
-                <Text style={[styles.kickerText, following && styles.kickerTextFollowing]}>
-                  {following ? t("navigation.following_hint") : t("navigation.destination")}
+              {following ? (
+                <Text numberOfLines={1} style={styles.title}>
+                  {t("navigation.navigating")}
                 </Text>
-              </View>
+              ) : (
+                <>
+                  <View style={styles.kickerRow}>
+                    <View style={styles.kickerDot} />
+                    <Text style={[styles.kickerText, following && styles.kickerTextFollowing]}>
+                      {t("navigation.destination")}
+                    </Text>
+                  </View>
 
-              <Text numberOfLines={2} style={styles.title}>
-                {poi.title}
-              </Text>
+                  <Text numberOfLines={2} style={styles.title}>
+                    {poi.title}
+                  </Text>
 
-              <Text numberOfLines={1} style={styles.subtitleLine}>
-                {poi.routeSummary ?? t("navigation.route_via_default")}
-              </Text>
+                  <Text numberOfLines={1} style={styles.subtitleLine}>
+                    {poi.routeSummary ?? t("navigation.route_via_default")}
+                  </Text>
 
-              <Text numberOfLines={1} style={styles.subtitleLine}>
-                {poi.trafficSummary ?? t("navigation.traffic_default")}
-              </Text>
+                  <Text numberOfLines={1} style={styles.subtitleLine}>
+                    {poi.trafficSummary ?? t("navigation.traffic_default")}
+                  </Text>
+                </>
+              )}
             </View>
 
             <Pressable onPress={onClear ?? onClose} hitSlop={10} style={styles.closeBtn}>
@@ -447,12 +432,7 @@ export default function NavigationSheet({
           </View>
 
           <View style={styles.metaLine}>
-            <Text style={styles.metaEta}>
-              {t("navigation.eta", {
-                min: selectedItem?.estimatedTimeMin || etaMin || 0,
-                defaultValue: t("navigation.eta_unknown"),
-              })}
-            </Text>
+            <Text style={styles.metaEta}>{etaLabel}</Text>
             <Text style={styles.metaDistance}>{formatKm(selectedItem?.distanceKm)}</Text>
           </View>
 
@@ -661,6 +641,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingRight: 6,
   },
+  routeEtaText: {
+    marginTop: 8,
+    fontSize: 11,
+    fontWeight: "800",
+  },
   dotsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -671,39 +656,6 @@ const styles = StyleSheet.create({
     width: 11,
     height: 11,
     borderRadius: 5.5,
-  },
-  routeMetrics: {
-    marginTop: 7,
-    flexDirection: "row",
-    gap: 6,
-    alignItems: "center",
-  },
-  metricBadge: {
-    height: 26,
-    borderRadius: 7,
-    overflow: "hidden",
-    flexDirection: "row",
-    backgroundColor: COLORS.badgeGray,
-  },
-  metricBadgeMuted: {
-    opacity: 0.7,
-  },
-  metricBadgeIconWrap: {
-    width: 62,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  metricBadgeValueWrap: {
-    minWidth: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
-    backgroundColor: COLORS.badgeGray,
-  },
-  metricBadgeValue: {
-    color: COLORS.white,
-    fontSize: 10,
-    fontWeight: "800",
   },
   chevronBtn: {
     width: 30,
@@ -746,18 +698,6 @@ const styles = StyleSheet.create({
   legendText: {
     fontSize: 12,
     fontWeight: "900",
-  },
-  expandedMetricRow: {
-    marginTop: 5,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  expandedMetricText: {
-    flex: 1,
-    fontSize: 11,
-    color: "#6F7C8B",
-    fontWeight: "700",
   },
   startBtn: {
     marginTop: 6,

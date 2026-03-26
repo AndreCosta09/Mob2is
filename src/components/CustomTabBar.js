@@ -23,7 +23,7 @@ const ICONS = {
 
 const SIDE_PAD = 0;
 const BAR_HEIGHT = 66;
-const CORNER_R = 10;
+const CORNER_R = 16;
 const NOTCH_W = 100;
 const NOTCH_DEPTH = 30;
 const BALL_SIZE = 58;
@@ -218,6 +218,17 @@ export default function CustomTabBar(props) {
           />
         </Svg>
 
+        <View
+          pointerEvents="none"
+          style={[
+            styles.bottomPatch,
+            {
+              width: barW,
+              backgroundColor: colors.surface,
+            },
+          ]}
+        />
+
         <Animated.View
           pointerEvents="none"
           style={[
@@ -308,19 +319,19 @@ const styles = StyleSheet.create({
     height: BAR_HEIGHT,
     bottom: 0,
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
   },
   tab: {
     flex: 1,
     height: BAR_HEIGHT,
     alignItems: "center",
     justifyContent: "center",
-    paddingBottom: 10,
+    paddingBottom: 2,
   },
   iconBox: {
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   iconImg: {
     resizeMode: "contain",
@@ -330,6 +341,13 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 12,
+  },
+  bottomPatch: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: CORNER_R + 4,
   },
   ballWrap: {
     position: "absolute",

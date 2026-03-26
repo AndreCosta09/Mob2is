@@ -4,14 +4,10 @@ import {
   Easing,
   FlatList,
   Image,
-  LayoutAnimation,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
-  UIManager,
   View,
-  ScrollView
 } from "react-native";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 
@@ -24,8 +20,6 @@ import PoiCard from "./search/PoiCard";
 import { fetchCategories, fetchPoisByCategory, getApiErrorMessage } from "../api/mockApi";
 import { UserContext } from "../context/UserContext";
 import { getAppPalette } from "../utils/accessibility";
-
-import Mob2isLogo from "../assets/logo/logo.svg";
 
 import { useTranslation } from "react-i18next";
 
@@ -77,12 +71,6 @@ export default function SearchScreen({ navigation }) {
 }, [categories, t]);
 
   useEffect(() => {
-    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
-  }, []);
-
-  useEffect(() => {
     (async () => {
       try {
         const c = await fetchCategories();
@@ -111,9 +99,6 @@ export default function SearchScreen({ navigation }) {
   const screenAnimStyle = useScreenTransition(viewKey);
 
   const pickCategory = async (cat) => {
-    if (!reduceMotion) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    }
     setSelectedCat(cat);
     setSelectedPoi(null);
     setPoisErrorMessage("");
@@ -134,10 +119,6 @@ export default function SearchScreen({ navigation }) {
   };
 
   const back = () => {
-    if (!reduceMotion) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    }
-
     if (selectedPoi) {
       setSelectedPoi(null);
       return;
@@ -156,10 +137,10 @@ export default function SearchScreen({ navigation }) {
       return;
     }
 
-    Animated.spring(heroIn, {
+    Animated.timing(heroIn, {
       toValue: 1,
-      friction: 8,
-      tension: 70,
+      duration: 180,
+      easing: Easing.out(Easing.quad),
       useNativeDriver: true,
     }).start();
   };
@@ -197,7 +178,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
       <View style={styles.greenHeader}>
         <Pressable onPress={back} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={styles.backText}>{"<"}</Text>
         </Pressable>
         <Text numberOfLines={1} style={styles.headerTitle}>
           {selectedPoi.title}
@@ -256,10 +237,6 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
           <AnimatedPressable style={styles.primaryBtn} onPress={() => goToMap(selectedPoi)}>
             <Text style={styles.primaryBtnText}>{t("search.go_to_place")}</Text>
           </AnimatedPressable>
-
-          <AnimatedPressable style={styles.secondaryBtn} onPress={() => {}}>
-            <Text style={styles.secondaryBtnText}>{t("search.navigate_inside")}</Text>
-          </AnimatedPressable>
         </View>
       </View>
     </View>
@@ -277,7 +254,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
         <View style={styles.greenHeader}>
           <Pressable onPress={back} style={styles.backBtn}>
-            <Text style={styles.backText}>‹</Text>
+            <Text style={styles.backText}>{"<"}</Text>
           </Pressable>
           <Text style={styles.headerTitle}> {t(`categories.${selectedCat.key}`, { defaultValue: selectedCat.name })}</Text>  
           <View style={{ width: 40 }} />
@@ -314,11 +291,6 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
   return (
       <View style={[styles.page, { backgroundColor: colors.bg }]}>
-
-      <View pointerEvents="none" style={styles.bgLogo}>
-        <Mob2isLogo width={450} height={450} opacity={0.15} />
-      </View>
-
       <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
         {categoriesErrorMessage ? (
           <View style={[styles.errorBox, { backgroundColor: colors.dangerBg, borderColor: colors.dangerBorder }]}>
@@ -368,12 +340,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
   },
-
-      bgLogo: {
-      position: "absolute",
-      left: -13,
-      top: 200,
-    },
 
       handle: {
       width: 56,

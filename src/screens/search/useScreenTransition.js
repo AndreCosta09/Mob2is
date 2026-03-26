@@ -17,7 +17,7 @@ export default function useScreenTransition(key) {
     anim.setValue(0);
     const transition = Animated.timing(anim, {
       toValue: 1,
-      duration: getMotionDuration(reduceMotion, 320),
+      duration: getMotionDuration(reduceMotion, 180),
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     });
@@ -30,10 +30,7 @@ export default function useScreenTransition(key) {
     opacity: anim,
     transform: [
       {
-        translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [26, 0] }),
-      },
-      {
-        translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }),
+        translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }),
       },
     ],
   };

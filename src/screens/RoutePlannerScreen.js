@@ -13,7 +13,6 @@ import { useTranslation } from "react-i18next";
 
 import { UserContext } from "../context/UserContext";
 import {
-  CONDITIONS,
   getConditionOption,
   ROUTE_PREFERENCES,
 } from "../utils/userProfileOptions";
@@ -62,25 +61,6 @@ function ConditionSummaryRow({ item }) {
   );
 }
 
-function ConditionOptionRow({ item, selected, onPress }) {
-  const Icon = item.Icon;
-  const { t } = useTranslation();
-
-  return (
-    <Pressable onPress={onPress} style={styles.optionRow}>
-      <View style={[styles.iconWrap, { backgroundColor: item.color }]}>
-        <Icon width={26} height={26} />
-      </View>
-
-      <Text style={styles.optionText}>{t(`onboarding.conditions.${item.key}`)}</Text>
-
-      <View style={[styles.radio, selected && styles.radioActive]}>
-        {selected ? <View style={styles.radioDot} /> : null}
-      </View>
-    </Pressable>
-  );
-}
-
 export default function RoutePlannerScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const tabBarH = useBottomTabBarHeight();
@@ -88,23 +68,21 @@ export default function RoutePlannerScreen({ navigation }) {
   const {
     condition,
     routePreference,
-    saveCondition,
+    clearCondition,
     saveRoutePreference,
   } = useContext(UserContext) ?? {};
 
   const selectedCondition = getConditionOption(condition);
 
-  const handleConditionChange = (nextCondition) => {
-    if (!nextCondition || nextCondition === condition) return;
-
+  const handleConditionChange = () => {
     Alert.alert(
       t("routePlanner.confirm_condition_title"),
-      t("routePlanner.confirm_condition_message"),
+      t("routePlanner.change_condition_redirect"),
       [
         { text: t("routePlanner.confirm_condition_cancel"), style: "cancel" },
         {
           text: t("routePlanner.confirm_condition_confirm"),
-          onPress: () => saveCondition?.(nextCondition),
+          onPress: () => clearCondition?.(),
         },
       ]
     );
@@ -138,17 +116,16 @@ export default function RoutePlannerScreen({ navigation }) {
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("routePlanner.change_condition")}</Text>
-
-          {CONDITIONS.map((item, index) => (
-            <View key={item.key}>
-              <ConditionOptionRow
-                item={item}
-                selected={condition === item.key}
-                onPress={() => handleConditionChange(item.key)}
-              />
-              {index < CONDITIONS.length - 1 ? <View style={styles.sep} /> : null}
+          <View style={styles.row}>
+            <View style={styles.rowTextWrap}>
+              <Text style={styles.rowTitle}>{t("routePlanner.current_condition")}</Text>
+              <Text style={styles.rowSub}>{t(`onboarding.conditions.${selectedCondition.key}`)}</Text>
             </View>
-          ))}
+          </View>
+
+          <Pressable onPress={handleConditionChange} style={styles.actionBtn}>
+            <Text style={styles.actionBtnText}>{t("routePlanner.change_condition")}</Text>
+          </Pressable>
         </View>
 
         <View style={styles.blockSpacer} />
@@ -286,6 +263,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     color: C.muted,
+  },
+  actionBtn: {
+    marginTop: 4,
+    marginHorizontal: 6,
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: C.orange,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "900",
   },
   radio: {
     width: 20,
