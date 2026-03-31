@@ -8,6 +8,7 @@ import {
   Modal,
   Animated,
   Easing,
+  Image,
 } from "react-native";
 
 import MapLibreGL from "@maplibre/maplibre-react-native";
@@ -27,7 +28,6 @@ import { MAP_STYLE_URL } from "../config/appConfig";
 import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
 import useRouteNavigation from "../hooks/useRouteNavigation";
 import ExploreSearchPanel from "../components/ExploreSearchPanel";
-import PoiDetailsSheet from "../components/PoiDetailsSheet";
 import NavigationSheet from "../components/NavigationSheet";
 
 const EMPTY_MAP_STYLE = {
@@ -555,7 +555,9 @@ const poiDockDescription =
   selectedPoi?.shortDescription ??
   selectedPoi?.description ??
   t("poiDetails.fallback_description");
-
+const poiDockImage = !selectedPoi?.isCustomPoint
+  ? selectedPoi?.images?.[0] ?? selectedPoi?.image ?? null
+  : null;
 const poiDockSubtitle = selectedPoi?.routeSummary ?? selectedPoi?.categoryName ?? "";
 const poiDockMeta = !selectedPoi?.isCustomPoint
   ? [selectedPoi?.etaText, selectedPoi?.distanceText].filter(Boolean).join(" | ")
@@ -1015,15 +1017,6 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
         </View>
       ) : null}
 
-      {/*
-      <PoiDetailsSheet
-        visible={!routeActive && detailsOpen && !!selectedPoi}
-        poi={selectedPoi}
-        onClose={() => setDetailsOpen(false)}
-        onStartNavigation={() => startNavigation(selectedPoi)}
-      />
-      */}
-
       {!routeActive && detailsOpen && !!selectedPoi ? (
         <View
           style={[
@@ -1038,50 +1031,81 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
         >
           <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
 
-          <View style={styles.poiDockHeader}>
-            <View style={{ flex: 1 }}>
-              <View style={styles.poiDockKicker}>
-                <View style={styles.poiDockDot} />
-                <Text style={[styles.poiDockKickerText, { color: colors.muted }]}>
-                  {t("navigation.destination")}
+          <ScrollView
+            style={styles.poiDockScroll}
+            contentContainerStyle={styles.poiDockScrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.poiDockHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={styles.poiDockKicker}>
+                  <View style={styles.poiDockDot} />
+                  <Text style={[styles.poiDockKickerText, { color: colors.muted }]}>
+                    {t("navigation.destination")}
+                  </Text>
+                </View>
+
+                <Text style={[styles.poiDockTitle, { color: colors.text }]} numberOfLines={2}>
+                  {selectedPoi.title}
                 </Text>
+
+                {!!poiDockSubtitle ? (
+                  <Text style={[styles.poiDockSubtitle, { color: colors.muted }]} numberOfLines={1}>
+                    {poiDockSubtitle}
+                  </Text>
+                ) : null}
+
+                {!!poiDockMeta ? (
+                  <Text style={[styles.poiDockMeta, { color: colors.muted }]} numberOfLines={1}>
+                    {poiDockMeta}
+                  </Text>
+                ) : null}
               </View>
 
-              <Text style={[styles.poiDockTitle, { color: colors.text }]} numberOfLines={2}>
-                {selectedPoi.title}
-              </Text>
-
-              {!!poiDockSubtitle ? (
-                <Text style={[styles.poiDockSubtitle, { color: colors.muted }]} numberOfLines={1}>
-                  {poiDockSubtitle}
-                </Text>
-              ) : null}
-
-              {!!poiDockMeta ? (
-                <Text style={[styles.poiDockMeta, { color: colors.muted }]} numberOfLines={1}>
-                  {poiDockMeta}
-                </Text>
-              ) : null}
+              <Pressable
+                onPress={() => setDetailsOpen(false)}
+                hitSlop={10}
+                style={[
+                  styles.poiDockCloseBtn,
+                  {
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.poiDockCloseText, { color: colors.text }]}>x</Text>
+              </Pressable>
             </View>
 
-            <Pressable
-              onPress={() => setDetailsOpen(false)}
-              hitSlop={10}
-              style={[styles.poiDockCloseBtn, { borderColor: colors.border }]}
-            >
-              <Text style={[styles.poiDockCloseText, { color: colors.text }]}>x</Text>
-            </Pressable>
-          </View>
+            {poiDockImage ? (
+              <View style={styles.poiDockHeroWrap}>
+                <Image
+                  source={{ uri: poiDockImage }}
+                  style={styles.poiDockHeroImage}
+                  resizeMode="cover"
+                />
+              </View>
+            ) : null}
 
-          <Text style={[styles.poiDockDescription, { color: colors.text }]} numberOfLines={3}>
-            {poiDockDescription}
-          </Text>
+            <Text style={[styles.poiDockDescription, { color: colors.text }]}>
+              {poiDockDescription}
+            </Text>
+          </ScrollView>
 
           <Pressable
-            style={[styles.poiDockAction, { backgroundColor: colors.accentStrong }]}
+            style={[
+              styles.poiDockAction,
+              {
+                backgroundColor: colors.accent,
+                borderColor: colors.accent,
+              },
+            ]}
             onPress={() => startNavigation(selectedPoi)}
           >
-            <Text style={styles.poiDockActionText}>{t("poiDetails.select_route")}</Text>
+            <Text style={[styles.poiDockActionText, { color: colors.accentText }]}>
+              {t("poiDetails.select_route")}
+            </Text>
           </Pressable>
         </View>
       ) : null}
@@ -1322,6 +1346,15 @@ filterIconBtn: {
   },
   poiBottomDock: {
     gap: 12,
+    maxHeight: "72%",
+  },
+  poiDockScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  poiDockScrollContent: {
+    paddingBottom: 4,
+    gap: 12,
   },
   poiDockHeader: {
     flexDirection: "row",
@@ -1359,6 +1392,15 @@ filterIconBtn: {
     fontSize: 12,
     fontWeight: "800",
   },
+  poiDockHeroWrap: {
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#DDE6F0",
+  },
+  poiDockHeroImage: {
+    width: "100%",
+    height: 184,
+  },
   poiDockDescription: {
     fontSize: 14,
     lineHeight: 21,
@@ -1381,12 +1423,17 @@ filterIconBtn: {
   poiDockAction: {
     minHeight: 48,
     borderRadius: 16,
+    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   poiDockActionText: {
-    color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "900",
   },
