@@ -4,7 +4,6 @@ import {
   Easing,
   FlatList,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -16,6 +15,7 @@ import useScreenTransition from "./search/useScreenTransition";
 import AnimatedPressable from "./search/AnimatedPressable";
 import CategoryRow from "./search/CategoryRow";
 import PoiCard from "./search/PoiCard";
+import BackButton from "../components/BackButton";
 
 import { fetchCategories, fetchPoisByCategory, getApiErrorMessage } from "../api/mockApi";
 import { UserContext } from "../context/UserContext";
@@ -177,9 +177,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
     <View style={[styles.page, { backgroundColor: colors.bg }]}>
 
       <View style={styles.greenHeader}>
-        <Pressable onPress={back} style={styles.backBtn}>
-          <Text style={styles.backText}>{"<"}</Text>
-        </Pressable>
+        <BackButton onPress={back} />
         <Text numberOfLines={1} style={styles.headerTitle}>
           {selectedPoi.title}
         </Text>
@@ -253,9 +251,7 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
 
         <View style={styles.greenHeader}>
-          <Pressable onPress={back} style={styles.backBtn}>
-            <Text style={styles.backText}>{"<"}</Text>
-          </Pressable>
+          <BackButton onPress={back} />
           <Text style={styles.headerTitle}> {t(`categories.${selectedCat.key}`, { defaultValue: selectedCat.name })}</Text>  
           <View style={{ width: 40 }} />
 
@@ -368,14 +364,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 18,
   },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backText: { fontSize: 28, color: C.white, marginTop: -2 },
   headerTitle: {
     flex: 1,
     textAlign: "center",

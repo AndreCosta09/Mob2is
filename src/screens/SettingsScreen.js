@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 import { UserContext } from "../context/UserContext";
+import BackButton from "../components/BackButton";
 import { getAppPalette } from "../utils/accessibility";
 
 const KEY_LANG = "mob2is_lang_v1";
@@ -106,12 +107,7 @@ export default function SettingsScreen({ navigation }) {
   return (
     <View style={[styles.page, { paddingTop: topPad, backgroundColor: colors.bg }]}>
       <View style={styles.topBar}>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={[styles.backBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
-        >
-          <Text style={[styles.backTxt, { color: colors.text }]}>{"<"}</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={[styles.title, { color: colors.text }]}>{t("settings.title")}</Text>
         <View style={styles.sidePlaceholder} />
       </View>
@@ -224,19 +220,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 10,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backTxt: {
-    fontSize: 26,
-    fontWeight: "900",
-    marginTop: -2,
   },
   title: {
     fontSize: 18,

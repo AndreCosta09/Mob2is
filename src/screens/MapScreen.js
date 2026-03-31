@@ -550,6 +550,18 @@ useEffect(() => {
   navigation?.setParams?.({ destination: undefined });
 }, [route?.params?.destination, navigation, pickDestination]);
 
+const poiDockDescription =
+  selectedPoi?.notice ??
+  selectedPoi?.shortDescription ??
+  selectedPoi?.description ??
+  t("poiDetails.fallback_description");
+
+const poiDockSubtitle = selectedPoi?.routeSummary ?? selectedPoi?.categoryName ?? "";
+const poiDockMeta = !selectedPoi?.isCustomPoint
+  ? [selectedPoi?.etaText, selectedPoi?.distanceText].filter(Boolean).join(" | ")
+  : "";
+const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
+
 
   return (
     <View style={styles.page}>
@@ -747,7 +759,7 @@ useEffect(() => {
                 lineWidth: following ? (highContrast ? 9 : 7) : highContrast ? 7 : 5,
                 lineColor: ["get", "color"],
                 lineOpacity: 0.98,
-                lineCap: "round",
+                lineCap: "butt",
                 lineJoin: "round",
               }}
             />
@@ -968,6 +980,7 @@ useEffect(() => {
         </Pressable>
       ) : null}
 
+      {/*
       {!routeActive && !detailsOpen ? (
         <ExploreSearchPanel
           bottomOffset={tabBarH + 10}
@@ -977,13 +990,101 @@ useEffect(() => {
           userCoord={userCoord}
         />
       ) : null}
+      */}
 
+      {!routeActive && !detailsOpen ? (
+        <View
+          style={[
+            styles.mapBottomDock,
+            {
+              paddingBottom: mapDockBottomInset,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+          <ExploreSearchPanel
+            embedded
+            bottomOffset={tabBarH + 10}
+            onPickDestination={pickDestination}
+            reduceMotion={reduceMotion}
+            highContrast={highContrast}
+            userCoord={userCoord}
+          />
+        </View>
+      ) : null}
+
+      {/*
       <PoiDetailsSheet
         visible={!routeActive && detailsOpen && !!selectedPoi}
         poi={selectedPoi}
         onClose={() => setDetailsOpen(false)}
         onStartNavigation={() => startNavigation(selectedPoi)}
       />
+      */}
+
+      {!routeActive && detailsOpen && !!selectedPoi ? (
+        <View
+          style={[
+            styles.mapBottomDock,
+            styles.poiBottomDock,
+            {
+              paddingBottom: mapDockBottomInset,
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+
+          <View style={styles.poiDockHeader}>
+            <View style={{ flex: 1 }}>
+              <View style={styles.poiDockKicker}>
+                <View style={styles.poiDockDot} />
+                <Text style={[styles.poiDockKickerText, { color: colors.muted }]}>
+                  {t("navigation.destination")}
+                </Text>
+              </View>
+
+              <Text style={[styles.poiDockTitle, { color: colors.text }]} numberOfLines={2}>
+                {selectedPoi.title}
+              </Text>
+
+              {!!poiDockSubtitle ? (
+                <Text style={[styles.poiDockSubtitle, { color: colors.muted }]} numberOfLines={1}>
+                  {poiDockSubtitle}
+                </Text>
+              ) : null}
+
+              {!!poiDockMeta ? (
+                <Text style={[styles.poiDockMeta, { color: colors.muted }]} numberOfLines={1}>
+                  {poiDockMeta}
+                </Text>
+              ) : null}
+            </View>
+
+            <Pressable
+              onPress={() => setDetailsOpen(false)}
+              hitSlop={10}
+              style={[styles.poiDockCloseBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.poiDockCloseText, { color: colors.text }]}>x</Text>
+            </Pressable>
+          </View>
+
+          <Text style={[styles.poiDockDescription, { color: colors.text }]} numberOfLines={3}>
+            {poiDockDescription}
+          </Text>
+
+          <Pressable
+            style={[styles.poiDockAction, { backgroundColor: colors.accentStrong }]}
+            onPress={() => startNavigation(selectedPoi)}
+          >
+            <Text style={styles.poiDockActionText}>{t("poiDetails.select_route")}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <Modal
           visible={isCalculatingRoute}
@@ -1203,6 +1304,92 @@ filterIconBtn: {
   shadowRadius: 14,
   shadowOffset: { width: 0, height: 8 },
 },
+  mapBottomDock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderWidth: 1,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    elevation: 28,
+    shadowColor: "#000",
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -10 },
+  },
+  poiBottomDock: {
+    gap: 12,
+  },
+  poiDockHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  poiDockKicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  poiDockDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#39A25D",
+    marginRight: 6,
+  },
+  poiDockKickerText: {
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  poiDockTitle: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "900",
+  },
+  poiDockSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  poiDockMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  poiDockDescription: {
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: "700",
+  },
+  poiDockCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  poiDockCloseText: {
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: "400",
+  },
+  poiDockAction: {
+    minHeight: 48,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  poiDockActionText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "900",
+  },
   filterSheet: {
     position: "absolute",
     left: 0,

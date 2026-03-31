@@ -101,7 +101,7 @@ function mapAccessibilityValueToDot(value) {
   if (n >= 3) return "g";
   if (n >= 2) return "y";
   if (n >= 1) return "r";
-  return "g";
+  return "n";
 }
 
 function buildAccessibilitySummary(values = []) {

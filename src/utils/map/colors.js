@@ -6,7 +6,7 @@ export const ACCESS_COLORS = {
 };
 
 const LEVEL_ALTA = "Alta acessibilidade";
-const LEVEL_MEDIA = "Media acessibilidade";
+const LEVEL_MEDIA = "Média acessibilidade";
 const LEVEL_BAIXA = "Baixa acessibilidade";
 const LEVEL_NONE = "Sem dados";
 

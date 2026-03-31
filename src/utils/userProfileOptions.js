@@ -8,7 +8,7 @@ import VisualIcon from "../assets/condicao/visual.svg";
 export const CONDITIONS = [
   {
     key: "visual",
-    label: "DEFICIENCIA VISUAL",
+    label: "DEFICIÊNCIA VISUAL",
     color: "#FF6B57",
     Icon: VisualIcon,
   },
@@ -20,7 +20,7 @@ export const CONDITIONS = [
   },
   {
     key: "hearing",
-    label: "DEFICIENCIA AUDITIVA",
+    label: "DEFICIÊNCIA AUDITIVA",
     color: "#9C7CF4",
     Icon: HearingIcon,
   },
@@ -32,7 +32,7 @@ export const CONDITIONS = [
   },
   {
     key: "stroller",
-    label: "GRAVIDAS, CRIANCAS E CARRINHOS",
+    label: "GRÁVIDAS, CRIANÇAS E CARRINHOS",
     color: "#FF4D6D",
     Icon: StrollerIcon,
   },
@@ -47,17 +47,17 @@ export const CONDITIONS = [
 export const ROUTE_PREFERENCES = [
   {
     key: "rapida",
-    label: "Rapida",
+    label: "Rápida",
     subtitle: "Menor tempo estimado",
   },
   {
     key: "equilibrada",
     label: "Equilibrada",
-    subtitle: "Melhor equilibrio geral",
+    subtitle: "Melhor equilíbrio geral",
   },
   {
     key: "acessivel",
-    label: "Acessivel",
+    label: "Acessível",
     subtitle: "Maior foco na acessibilidade",
   },
 ];

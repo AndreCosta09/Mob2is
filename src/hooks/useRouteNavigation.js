@@ -616,7 +616,7 @@ export default function useRouteNavigation({
     const start = async () => {
       try {
         if (shouldUseDevStaticLocation()) {
-          console.log("[Mob2is] A usar localizacao fixa de desenvolvimento", {
+          console.log("[Mob2is] A usar localização fixa de desenvolvimento", {
             lng: DEV_STATIC_LOCATION_COORDS[0],
             lat: DEV_STATIC_LOCATION_COORDS[1],
           });
@@ -873,7 +873,7 @@ export default function useRouteNavigation({
             text: t("routeFlow.open_settings"),
             onPress: () => {
               Linking.openSettings().catch((error) => {
-                console.warn("[Mob2is] Nao foi possivel abrir as definicoes:", error);
+                console.warn("[Mob2is] Não foi possível abrir as definições:", error);
               });
             },
           },

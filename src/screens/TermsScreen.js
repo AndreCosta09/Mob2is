@@ -11,6 +11,7 @@ import {
 import Pdf from "react-native-pdf";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
+import BackButton from "../components/BackButton";
 
 const C = {
   bg: "#F3F5F7",
@@ -49,9 +50,7 @@ export default function TermsScreen({ navigation }) {
   return (
     <View style={[styles.page, { paddingTop: Math.max(insets.top, 12) }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backTxt}>{"<"}</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
 
         <View style={styles.titleWrap}>
           <Text style={styles.title}>{t("more.items.terms.title")}</Text>
@@ -119,22 +118,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 10,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: C.stroke,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backTxt: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: C.text,
-    marginTop: -2,
   },
   titleWrap: {
     flex: 1,

@@ -93,6 +93,7 @@ export default function ExploreSearchPanel({
   reduceMotion = false,
   highContrast = false,
   userCoord = null,
+  embedded = false,
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -237,7 +238,13 @@ export default function ExploreSearchPanel({
 
   return (
     <>
-      <View style={[styles.panel, { bottom: bottomOffset + EXTRA_GAP }]}>
+      <View
+        style={
+          embedded
+            ? styles.panelEmbedded
+            : [styles.panel, { bottom: bottomOffset + EXTRA_GAP }]
+        }
+      >
         <View
           style={[
             styles.searchRow,
@@ -415,6 +422,10 @@ const styles = StyleSheet.create({
     right: 16,
     backgroundColor: "transparent",
   },
+  panelEmbedded: {
+    width: "100%",
+    backgroundColor: "transparent",
+  },
   searchRow: {
     height: 58,
     borderRadius: 22,
@@ -425,11 +436,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingLeft: 12,
     paddingRight: 8,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
   },
   searchTapArea: {
     flex: 1,

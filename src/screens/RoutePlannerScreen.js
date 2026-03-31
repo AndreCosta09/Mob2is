@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTranslation } from "react-i18next";
 
 import { UserContext } from "../context/UserContext";
+import BackButton from "../components/BackButton";
 import {
   getConditionOption,
   ROUTE_PREFERENCES,
@@ -91,9 +92,7 @@ export default function RoutePlannerScreen({ navigation }) {
   return (
     <View style={[styles.page, { paddingTop: Math.max(insets.top, 12) }]}>
       <View style={styles.topBar}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backTxt}>{"<"}</Text>
-        </Pressable>
+        <BackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>{t("routePlanner.title")}</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -170,22 +169,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: C.stroke,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backTxt: {
-    fontSize: 26,
-    fontWeight: "900",
-    color: C.text,
-    marginTop: -2,
   },
   title: {
     fontSize: 18,
