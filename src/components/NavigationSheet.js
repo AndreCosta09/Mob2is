@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { useTranslation } from "react-i18next";
+import { IconClose } from "./PoiIcons";
 
 const SHEET_HIDDEN_Y = 900;
 
@@ -79,17 +79,6 @@ function formatDurationCompact(value) {
   return `${hours} h ${String(minutes).padStart(2, "0")} min`;
 }
 
-function formatEtaLabel(value, t) {
-  const totalMinutes = Math.round(Number(value));
-  if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
-    return t("navigation.eta_unknown");
-  }
-
-  return t("navigation.eta_value", {
-    value: formatDurationCompact(totalMinutes),
-  });
-}
-
 function formatPercent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "0%";
@@ -98,9 +87,9 @@ function formatPercent(value) {
 
 function mapAccessibilityValueToDot(value) {
   const n = Number(value);
-  if (n >= 3) return "g";
-  if (n >= 2) return "y";
-  if (n >= 1) return "r";
+  if (n === 2) return "g";
+  if (n === 1) return "y";
+  if (n === 3) return "r";
   return "n";
 }
 
@@ -118,13 +107,18 @@ function buildAccessibilitySummary(values = []) {
     };
   }
 
-  const highCount = arr.filter((value) => value >= 3).length;
-  const mediumCount = arr.filter((value) => value >= 2 && value < 3).length;
-  const lowCount = arr.filter((value) => value >= 1 && value < 2).length;
+  const highCount = arr.filter((value) => value === 2).length;
+  const mediumCount = arr.filter((value) => value === 1).length;
+  const lowCount = arr.filter((value) => value === 3).length;
   const total = arr.length;
 
+  const dots = arr.map(mapAccessibilityValueToDot).slice(0, 10);
+  while (dots.length < 10) {
+    dots.push("n");
+  }
+
   return {
-    dots: arr.map(mapAccessibilityValueToDot),
+    dots,
     highPct: formatPercent((highCount / total) * 100),
     mediumPct: formatPercent((mediumCount / total) * 100),
     lowPct: formatPercent((lowCount / total) * 100),
@@ -254,8 +248,10 @@ export default function NavigationSheet({
   onClose,
   onClear,
   onStartFollow,
+  bottomOffset = 0,
 }) {
   const y = useRef(new Animated.Value(SHEET_HIDDEN_Y)).current;
+  const dragStartYRef = useRef(0);
   const { height } = useWindowDimensions();
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -369,30 +365,55 @@ export default function NavigationSheet({
 
   const hasApiProfiles = availableProfiles.size > 0;
   const maxSheetHeight = Math.min(height * 0.62, height - 6);
-  const etaLabel = formatEtaLabel(selectedItem?.estimatedTimeMin || etaMin || 0, t);
+  const onSheetDragGrant = (event) => {
+    dragStartYRef.current = event.nativeEvent.pageY;
+    y.stopAnimation();
+  };
+
+  const onSheetDragMove = (event) => {
+    const dy = Math.max(0, event.nativeEvent.pageY - dragStartYRef.current);
+    y.setValue(dy);
+  };
+
+  const onSheetDragRelease = (event) => {
+    const dy = event.nativeEvent.pageY - dragStartYRef.current;
+    if (dy > 48) {
+      onClose?.();
+      return;
+    }
+
+    Animated.spring(y, {
+      toValue: 0,
+      damping: 22,
+      stiffness: 220,
+      useNativeDriver: true,
+    }).start();
+  };
 
   if (!rendered || !poi) return null;
 
   return (
-    <Modal
-      visible={rendered}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      onRequestClose={onClose}
-    >
       <View style={styles.modalRoot} pointerEvents="box-none">
         <Animated.View
           style={[
             styles.sheet,
             {
-              bottom: 0,
+              bottom: bottomOffset,
               maxHeight: maxSheetHeight,
               transform: [{ translateY: y }],
             },
           ]}
         >
-          <Pressable onPress={onClose} style={styles.handleHit}>
+          <Pressable
+            onPress={onClose}
+            style={styles.handleHit}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={onSheetDragGrant}
+            onResponderMove={onSheetDragMove}
+            onResponderRelease={onSheetDragRelease}
+            onResponderTerminate={onSheetDragRelease}
+          >
             <View style={styles.handle} />
           </Pressable>
 
@@ -426,14 +447,9 @@ export default function NavigationSheet({
               )}
             </View>
 
-            <Pressable onPress={onClear ?? onClose} hitSlop={10} style={styles.closeBtn}>
-              <Text style={styles.closeText}>×</Text>
+            <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+              <IconClose size={16} color={COLORS.textMuted} />
             </Pressable>
-          </View>
-
-          <View style={styles.metaLine}>
-            <Text style={styles.metaEta}>{etaLabel}</Text>
-            <Text style={styles.metaDistance}>{formatKm(selectedItem?.distanceKm)}</Text>
           </View>
 
           <ScrollView
@@ -486,15 +502,19 @@ export default function NavigationSheet({
             <Pressable style={styles.startBtn} onPress={onStartFollow}>
               <Text style={styles.startBtnText}>{t("navigation.start_route")}</Text>
             </Pressable>
-          ) : null}
+          ) : (
+            <Pressable style={styles.stopBtn} onPress={onClear}>
+              <Text style={styles.stopBtnText}>{t("navigation.stop_route")}</Text>
+            </Pressable>
+          )}
         </Animated.View>
       </View>
-    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalRoot: {
+    ...StyleSheet.absoluteFillObject,
     flex: 1,
     justifyContent: "flex-end",
   },
@@ -567,17 +587,15 @@ const styles = StyleSheet.create({
     color: "#4F5661",
   },
   closeBtn: {
-    width: 28,
-    height: 28,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "rgba(5,31,65,0.08)",
+    backgroundColor: COLORS.white,
     alignItems: "center",
     justifyContent: "center",
     marginTop: -2,
-  },
-  closeText: {
-    fontSize: 26,
-    lineHeight: 26,
-    color: "#98A4B4",
-    fontWeight: "300",
   },
   metaLine: {
     marginTop: 8,
@@ -713,6 +731,24 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
   },
   startBtnText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  stopBtn: {
+    marginTop: 6,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: COLORS.navy,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 6,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  stopBtnText: {
     color: COLORS.white,
     fontSize: 15,
     fontWeight: "900",

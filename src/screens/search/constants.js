@@ -11,6 +11,5 @@ export const C = {
 };
 
 export const ASSETS = {
-  placeholder:
-    "https://images.unsplash.com/photo-1526481280695-3c687fd5432c?auto=format&fit=crop&w=1200&q=60",
+  placeholder: require("../../assets/logo/logoIconAPP.png"),
 };

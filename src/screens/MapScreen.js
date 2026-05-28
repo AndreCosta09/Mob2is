@@ -25,10 +25,12 @@ import {
 } from "../utils/accessibility";
 import { MAP_STYLE_URL } from "../config/appConfig";
 
-import { PoiSvgIcon, IconCenter, IconFilters} from "../components/PoiIcons";
+import { PoiSvgIcon, IconCenter, IconFilters, IconClose } from "../components/PoiIcons";
 import useRouteNavigation from "../hooks/useRouteNavigation";
 import ExploreSearchPanel from "../components/ExploreSearchPanel";
 import NavigationSheet from "../components/NavigationSheet";
+
+const POI_IMAGE_PLACEHOLDER = require("../assets/logo/logoIconAPP.png");
 
 const EMPTY_MAP_STYLE = {
   version: 8,
@@ -274,6 +276,11 @@ export default function MapScreen({ route, navigation }) {
   const [mapStyleLoaded, setMapStyleLoaded] = useState(false);
   const [poiRenderVersion, setPoiRenderVersion] = useState(0);
   const [mapZoomLevel, setMapZoomLevel] = useState(15);
+  const [poiDockImageFailed, setPoiDockImageFailed] = useState(false);
+  const filterSheetDragStartYRef = useRef(0);
+  const poiSheetDragStartYRef = useRef(0);
+  const filterSheetTranslateY = useRef(new Animated.Value(0)).current;
+  const poiSheetTranslateY = useRef(new Animated.Value(0)).current;
 
 
   const nav = useRouteNavigation({
@@ -365,6 +372,70 @@ export default function MapScreen({ route, navigation }) {
 
   const toggleCat = (id) => {
     setSelectedCatIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const onFilterSheetDragGrant = (event) => {
+    filterSheetDragStartYRef.current = event.nativeEvent.pageY;
+    filterSheetTranslateY.stopAnimation();
+  };
+
+  const onFilterSheetDragMove = (event) => {
+    const dy = Math.max(0, event.nativeEvent.pageY - filterSheetDragStartYRef.current);
+    filterSheetTranslateY.setValue(dy);
+  };
+
+  const onFilterSheetDragRelease = (event) => {
+    const dy = event.nativeEvent.pageY - filterSheetDragStartYRef.current;
+    if (dy > 48) {
+      Animated.timing(filterSheetTranslateY, {
+        toValue: 520,
+        duration: 180,
+        useNativeDriver: true,
+      }).start(() => {
+        filterSheetTranslateY.setValue(0);
+        setFilterOpen(false);
+      });
+      return;
+    }
+
+    Animated.spring(filterSheetTranslateY, {
+      toValue: 0,
+      damping: 20,
+      stiffness: 220,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const onPoiSheetDragGrant = (event) => {
+    poiSheetDragStartYRef.current = event.nativeEvent.pageY;
+    poiSheetTranslateY.stopAnimation();
+  };
+
+  const onPoiSheetDragMove = (event) => {
+    const dy = Math.max(0, event.nativeEvent.pageY - poiSheetDragStartYRef.current);
+    poiSheetTranslateY.setValue(dy);
+  };
+
+  const onPoiSheetDragRelease = (event) => {
+    const dy = event.nativeEvent.pageY - poiSheetDragStartYRef.current;
+    if (dy > 48) {
+      Animated.timing(poiSheetTranslateY, {
+        toValue: 520,
+        duration: 180,
+        useNativeDriver: true,
+      }).start(() => {
+        poiSheetTranslateY.setValue(0);
+        setDetailsOpen(false);
+      });
+      return;
+    }
+
+    Animated.spring(poiSheetTranslateY, {
+      toValue: 0,
+      damping: 20,
+      stiffness: 220,
+      useNativeDriver: true,
+    }).start();
   };
 
   useEffect(() => {
@@ -550,6 +621,17 @@ useEffect(() => {
   navigation?.setParams?.({ destination: undefined });
 }, [route?.params?.destination, navigation, pickDestination]);
 
+useEffect(() => {
+  setPoiDockImageFailed(false);
+}, [selectedPoi?.id]);
+
+useEffect(() => {
+  const hideTabBar = detailsOpen || navSheetOpen || filterOpen;
+  navigation?.setOptions?.({
+    tabBarStyle: hideTabBar ? { display: "none" } : undefined,
+  });
+}, [detailsOpen, filterOpen, navSheetOpen, navigation]);
+
 const poiDockDescription =
   selectedPoi?.notice ??
   selectedPoi?.shortDescription ??
@@ -562,7 +644,15 @@ const poiDockSubtitle = selectedPoi?.routeSummary ?? selectedPoi?.categoryName ?
 const poiDockMeta = !selectedPoi?.isCustomPoint
   ? [selectedPoi?.etaText, selectedPoi?.distanceText].filter(Boolean).join(" | ")
   : "";
-const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
+const mapDockBottomInset = Math.min(
+  146,
+  Math.max(112, tabBarH + Math.max(insets.bottom, 8) + 28)
+);
+const poiDockBottomInset = Math.max(
+  20,
+  Math.max(insets.bottom, 10) + 12
+);
+const routeSheetBottomOffset = 0;
 
 
   return (
@@ -572,6 +662,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
         mapStyle={mapStyle}
         logoEnabled={false}
         attributionEnabled={false}
+        compassEnabled={false}
         preferredFramesPerSecond={30}
         surfaceView={true}
         onPress={handleMapPress}
@@ -666,10 +757,10 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
         {mapStyleLoaded && !routeActive && !showClusteredPois &&
           (filteredPois ?? [])
           .filter((p) => Array.isArray(p?.coords) && p?.id !== selectedPoi?.id)
-          .map((p) => (
+          .map((p, index) => (
             <MapLibreGL.PointAnnotation
-              key={`poi-${poiRenderVersion}-${p.id}`}
-              id={`poi-${poiRenderVersion}-${p.id}`}
+              key={`poi-${poiRenderVersion}-${p.id}-${index}`}
+              id={`poi-${poiRenderVersion}-${p.id}-${index}`}
               coordinate={p.coords}
               onSelected={() => pickDestination(p)}
             >
@@ -776,7 +867,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
           style={[
             styles.centerBtn,
             {
-              top: insets.top + 62,
+              top: insets.top + 42,
               backgroundColor: colors.surface,
               borderColor: colors.border,
             },
@@ -794,7 +885,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
              style={[
                styles.filterIconBtn,
                {
-                  top: insets.top + 62,
+                  top: insets.top + 42,
                   backgroundColor: colors.surface,
                   borderColor: colors.border,
                 },
@@ -832,17 +923,28 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
               onPress={() => setFilterOpen(false)}
             />
 
-            <View
+            <Animated.View
               style={[
                 styles.filterSheet,
                 {
                   paddingBottom: insets.bottom + tabBarH + 12,
                   backgroundColor: colors.bg,
                   borderColor: colors.border,
+                  transform: [{ translateY: filterSheetTranslateY }],
                 },
               ]}
             >
-              <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+              <View
+                style={styles.sheetHandleHit}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={onFilterSheetDragGrant}
+                onResponderMove={onFilterSheetDragMove}
+                onResponderRelease={onFilterSheetDragRelease}
+                onResponderTerminate={onFilterSheetDragRelease}
+              >
+                <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+              </View>
 
               <View style={styles.filterHeader}>
                 <View style={{ flex: 1 }}>
@@ -931,7 +1033,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
                   );
                 })}
               </ScrollView>
-            </View>
+            </Animated.View>
           </Modal>
         </>
       ) : null}
@@ -1018,18 +1120,29 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
       ) : null}
 
       {!routeActive && detailsOpen && !!selectedPoi ? (
-        <View
+        <Animated.View
           style={[
             styles.mapBottomDock,
             styles.poiBottomDock,
             {
-              paddingBottom: mapDockBottomInset,
+              paddingBottom: poiDockBottomInset,
               backgroundColor: colors.surface,
               borderColor: colors.border,
+              transform: [{ translateY: poiSheetTranslateY }],
             },
           ]}
         >
-          <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+          <View
+            style={styles.sheetHandleHit}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={onPoiSheetDragGrant}
+            onResponderMove={onPoiSheetDragMove}
+            onResponderRelease={onPoiSheetDragRelease}
+            onResponderTerminate={onPoiSheetDragRelease}
+          >
+            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+          </View>
 
           <ScrollView
             style={styles.poiDockScroll}
@@ -1046,7 +1159,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
                   </Text>
                 </View>
 
-                <Text style={[styles.poiDockTitle, { color: colors.text }]} numberOfLines={2}>
+                <Text style={[styles.poiDockTitle, { color: colors.text }]} numberOfLines={3}>
                   {selectedPoi.title}
                 </Text>
 
@@ -1074,16 +1187,17 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
                   },
                 ]}
               >
-                <Text style={[styles.poiDockCloseText, { color: colors.text }]}>x</Text>
+                <IconClose size={18} color={colors.text} />
               </Pressable>
             </View>
 
             {poiDockImage ? (
               <View style={styles.poiDockHeroWrap}>
                 <Image
-                  source={{ uri: poiDockImage }}
+                  source={poiDockImageFailed ? POI_IMAGE_PLACEHOLDER : { uri: poiDockImage }}
                   style={styles.poiDockHeroImage}
                   resizeMode="cover"
+                  onError={() => setPoiDockImageFailed(true)}
                 />
               </View>
             ) : null}
@@ -1107,7 +1221,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
               {t("poiDetails.select_route")}
             </Text>
           </Pressable>
-        </View>
+        </Animated.View>
       ) : null}
 
       <Modal
@@ -1156,7 +1270,7 @@ const mapDockBottomInset = tabBarH + Math.max(insets.bottom, 12) + 48;
       <NavigationSheet
         active={routeActive && !!selectedPoi}
         open={navSheetOpen}
-        bottomOffset={0}
+        bottomOffset={routeSheetBottomOffset}
         poi={selectedPoi}
         etaMin={etaMin}
         segments={routeSegments}
@@ -1333,6 +1447,7 @@ filterIconBtn: {
     left: 0,
     right: 0,
     bottom: 0,
+    zIndex: 90,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     borderWidth: 1,
@@ -1346,6 +1461,8 @@ filterIconBtn: {
   },
   poiBottomDock: {
     gap: 12,
+    zIndex: 140,
+    elevation: 60,
     maxHeight: "72%",
   },
   poiDockScroll: {
@@ -1399,7 +1516,7 @@ filterIconBtn: {
   },
   poiDockHeroImage: {
     width: "100%",
-    height: 184,
+    height: 148,
   },
   poiDockDescription: {
     fontSize: 14,
@@ -1407,18 +1524,13 @@ filterIconBtn: {
     fontWeight: "700",
   },
   poiDockCloseBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
-  },
-  poiDockCloseText: {
-    fontSize: 22,
-    lineHeight: 22,
-    fontWeight: "400",
   },
   poiDockAction: {
     minHeight: 48,
@@ -1462,6 +1574,12 @@ filterIconBtn: {
     borderRadius: 999,
     backgroundColor: "rgba(11,45,77,0.16)",
     marginBottom: 10,
+  },
+  sheetHandleHit: {
+    alignSelf: "center",
+    paddingHorizontal: 32,
+    paddingTop: 2,
+    paddingBottom: 10,
   },
   filterHeader: { flexDirection: "row", alignItems: "center", gap: 10, paddingBottom: 12 },
   filterTitle: { fontWeight: "900", fontSize: 16, color: "#051F41" },

@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
 import AnimatedPressable from "./AnimatedPressable";
 import { ASSETS, C } from "./constants";
 
 export default function PoiCard({ item, index, onPress }) {
   const enter = useRef(new Animated.Value(0)).current;
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     Animated.timing(enter, {
@@ -25,7 +26,12 @@ export default function PoiCard({ item, index, onPress }) {
     <Animated.View style={style}>
       <AnimatedPressable onPress={onPress} style={S.card}>
         <View style={S.imgWrap}>
-          <Image source={{ uri: item.image ?? ASSETS.placeholder }} style={S.img} resizeMode="cover" />
+          <Image
+            source={item.image && !imageFailed ? { uri: item.image } : ASSETS.placeholder}
+            style={S.img}
+            resizeMode="cover"
+            onError={() => setImageFailed(true)}
+          />
         </View>
 
         <View style={S.footer}>

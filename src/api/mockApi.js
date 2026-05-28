@@ -4,7 +4,7 @@ import { devLog, devWarn } from "../utils/logger";
 
 export const VIANA_COORDS = [-8.8273, 41.6946];
 
-const API_BASE_URL = "https://mob2is.pt/viana";
+const API_BASE_URL = "https://mob2is.pt/outdoor";
 
 export const CATEGORIES = [];
 export const POIS = [];
@@ -368,16 +368,25 @@ function normalizeSingleRouteFromV2(route) {
 
   const rawPontos = Array.isArray(route.pontos) ? route.pontos : [];
   const rawCaminho = normalizeV2Caminho(route.caminho);
+  const normalizedAccessibility = Array.isArray(route.arrayAcessibilidadeNormalizada)
+    ? route.arrayAcessibilidadeNormalizada
+    : Array.isArray(route.ArrayAcessibilidadeNormalizada)
+    ? route.ArrayAcessibilidadeNormalizada
+    : [];
+  const accessibilityLevels = normalizedAccessibility.length
+    ? normalizedAccessibility
+    : Array.isArray(route.niveis_acessibilidade)
+    ? route.niveis_acessibilidade
+    : Array.isArray(route.cores)
+    ? route.cores
+    : [];
 
   return {
     ...route,
+    arrayAcessibilidadeNormalizada: normalizedAccessibility,
     pontos: rawPontos,
     caminho: rawCaminho,
-    cores: Array.isArray(route.niveis_acessibilidade)
-      ? route.niveis_acessibilidade
-      : Array.isArray(route.cores)
-      ? route.cores
-      : [],
+    cores: accessibilityLevels,
     caminhoNos: rawPontos,
     pontosCoords: rawCaminho,
   };

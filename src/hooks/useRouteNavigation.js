@@ -473,7 +473,12 @@ export default function useRouteNavigation({
     }
 
     const caminho = Array.isArray(pd?.caminho) ? pd.caminho : [];
-    const accessArr = pd?.niveis_acessibilidade ?? pd?.cores ?? [];
+    const accessArr =
+      pd?.arrayAcessibilidadeNormalizada ??
+      pd?.ArrayAcessibilidadeNormalizada ??
+      pd?.niveis_acessibilidade ??
+      pd?.cores ??
+      [];
 
     devLog("[Mob2is] applyPathDataToMap input", {
       perfil: pd?.perfil,

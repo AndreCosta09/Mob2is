@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Animated,
   FlatList,
   Modal,
   PermissionsAndroid,
@@ -14,6 +15,7 @@ import Voice from "@react-native-voice/voice";
 import { useTranslation } from "react-i18next";
 import MicrofoneIcon from "../assets/microfone.svg";
 import SearchIcon from "../assets/search.svg";
+import BackIcon from "../assets/back.svg";
 import { getApiErrorMessage, getPOIs, searchPois } from "../api/mockApi";
 import { getAppPalette, getModalAnimationType } from "../utils/accessibility";
 import { haversineMeters } from "../utils/map/geo";
@@ -102,6 +104,8 @@ export default function ExploreSearchPanel({
   const [heardText, setHeardText] = useState("");
   const [searchErrorMessage, setSearchErrorMessage] = useState("");
   const finishVoiceWithTextRef = useRef(null);
+  const sheetDragStartYRef = useRef(0);
+  const sheetTranslateY = useRef(new Animated.Value(0)).current;
 
   const { i18n, t } = useTranslation();
   const colors = getAppPalette(highContrast);
@@ -236,6 +240,38 @@ export default function ExploreSearchPanel({
     }
   };
 
+  const onSheetDragGrant = (event) => {
+    sheetDragStartYRef.current = event.nativeEvent.pageY;
+    sheetTranslateY.stopAnimation();
+  };
+
+  const onSheetDragMove = (event) => {
+    const dy = Math.max(0, event.nativeEvent.pageY - sheetDragStartYRef.current);
+    sheetTranslateY.setValue(dy);
+  };
+
+  const onSheetDragRelease = (event) => {
+    const dy = event.nativeEvent.pageY - sheetDragStartYRef.current;
+    if (dy > 48) {
+      Animated.timing(sheetTranslateY, {
+        toValue: 520,
+        duration: 180,
+        useNativeDriver: true,
+      }).start(() => {
+        sheetTranslateY.setValue(0);
+        setOpen(false);
+      });
+      return;
+    }
+
+    Animated.spring(sheetTranslateY, {
+      toValue: 0,
+      damping: 20,
+      stiffness: 220,
+      useNativeDriver: true,
+    }).start();
+  };
+
   return (
     <>
       <View
@@ -304,19 +340,39 @@ export default function ExploreSearchPanel({
       >
         <Pressable style={[styles.backdrop, { backgroundColor: colors.overlay }]} onPress={() => setOpen(false)} />
 
-        <View
+        <Animated.View
           style={[
             styles.sheet,
             {
-              bottom: bottomOffset - 8,
+              paddingBottom: 20,
               backgroundColor: colors.surface,
               borderColor: colors.border,
+              transform: [{ translateY: sheetTranslateY }],
             },
           ]}
         >
+          <View
+            style={styles.handleHit}
+            onStartShouldSetResponder={() => true}
+            onMoveShouldSetResponder={() => true}
+            onResponderGrant={onSheetDragGrant}
+            onResponderMove={onSheetDragMove}
+            onResponderRelease={onSheetDragRelease}
+            onResponderTerminate={onSheetDragRelease}
+          >
+            <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+          </View>
+
           <View style={styles.sheetTop}>
-            <Pressable onPress={() => setOpen(false)} hitSlop={10}>
-              <Text style={[styles.backChevron, { color: colors.muted }]}>{"<"}</Text>
+            <Pressable
+              onPress={() => setOpen(false)}
+              hitSlop={10}
+              style={[
+                styles.backBtn,
+                { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+              ]}
+            >
+              <BackIcon width={20} height={20} />
             </Pressable>
 
             <TextInput
@@ -409,7 +465,7 @@ export default function ExploreSearchPanel({
               </Pressable>
             )}
           />
-        </View>
+        </Animated.View>
       </Modal>
     </>
   );
@@ -470,31 +526,49 @@ const styles = StyleSheet.create({
   },
   sheet: {
     position: "absolute",
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: "#FFFFFF",
-    borderRadius: 22,
-    padding: 14,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 8,
     borderWidth: 1,
     borderColor: "rgba(11,45,77,0.08)",
-    maxHeight: "55%",
+    maxHeight: "54%",
+  },
+  handleHit: {
+    alignSelf: "center",
+    paddingHorizontal: 32,
+    paddingTop: 2,
+    paddingBottom: 10,
+  },
+  sheetHandle: {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(11,45,77,0.16)",
   },
   sheetTop: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     marginBottom: 12,
   },
-  backChevron: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#6B7A88",
-    width: 14,
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   input: {
     flex: 1,
     borderRadius: 18,
     borderWidth: 1,
+    minHeight: 46,
     paddingHorizontal: 14,
     paddingVertical: 10,
     fontWeight: "800",

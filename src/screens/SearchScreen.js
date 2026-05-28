@@ -52,6 +52,7 @@ export default function SearchScreen({ navigation }) {
 
   const [pois, setPois] = useState([]);
   const [selectedPoi, setSelectedPoi] = useState(null);
+  const [detailImageFailed, setDetailImageFailed] = useState(false);
   const [categoriesErrorMessage, setCategoriesErrorMessage] = useState("");
   const [poisErrorMessage, setPoisErrorMessage] = useState("");
 
@@ -130,6 +131,7 @@ export default function SearchScreen({ navigation }) {
 
   const openPoi = (poi) => {
     setSelectedPoi(poi);
+    setDetailImageFailed(false);
 
     heroIn.setValue(0);
     if (reduceMotion) {
@@ -194,9 +196,14 @@ const actionsTotal = actionsBottom + (actionsH || actionsFallback) + 10;
 
           <View style={styles.detailHero}>
             <Image
-              source={{ uri: selectedPoi.image ?? ASSETS.placeholder }}
+              source={
+                selectedPoi.image && !detailImageFailed
+                  ? { uri: selectedPoi.image }
+                  : ASSETS.placeholder
+              }
               style={styles.detailHeroImg}
               resizeMode="cover"
+              onError={() => setDetailImageFailed(true)}
             />
           </View>
 

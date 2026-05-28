@@ -12,9 +12,9 @@ const LEVEL_NONE = "Sem dados";
 
 export function levelFromApiValue(v) {
   const n = Number(v);
-  if (n === 3) return LEVEL_ALTA;
-  if (n === 2) return LEVEL_MEDIA;
-  if (n === 1) return LEVEL_BAIXA;
+  if (n === 2) return LEVEL_ALTA;
+  if (n === 1) return LEVEL_MEDIA;
+  if (n === 3) return LEVEL_BAIXA;
   if (n === 0) return LEVEL_NONE;
   return LEVEL_ALTA;
 }

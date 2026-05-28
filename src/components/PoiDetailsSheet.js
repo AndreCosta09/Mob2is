@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useTranslation } from "react-i18next";
+import { IconClose } from "./PoiIcons";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -152,7 +153,7 @@ export default function PoiDetailsSheet({
                 accessibilityRole="button"
                 accessibilityLabel={t("common.cancel")}
               >
-                <Text style={styles.closeText}>×</Text>
+                <IconClose size={16} color="rgba(5,31,65,0.62)" />
               </Pressable>
             </View>
 
@@ -280,18 +281,14 @@ const styles = StyleSheet.create({
   },
 
   closeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: "rgba(5,31,65,0.10)",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  closeText: {
-    fontSize: 24,
-    lineHeight: 24,
-    color: "rgba(5,31,65,0.38)",
-    fontWeight: "400",
   },
 
   title: {

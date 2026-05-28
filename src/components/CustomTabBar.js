@@ -106,6 +106,8 @@ export default function CustomTabBar(props) {
   const { state, descriptors, navigation } = props || {};
   const routes = state?.routes ?? EMPTY_ROUTES;
   const activeIndex = state?.index ?? 0;
+  const activeRouteKey = routes[activeIndex]?.key;
+  const activeOptions = activeRouteKey ? descriptors?.[activeRouteKey]?.options : null;
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { preferences } = useContext(UserContext) ?? {};
@@ -177,7 +179,7 @@ export default function CustomTabBar(props) {
   const ballTop = -BALL_SIZE / 2 - BALL_GAP;
   const activeRouteName = routes[activeIndex]?.name;
 
-  if (!routes.length) return null;
+  if (!routes.length || activeOptions?.tabBarStyle?.display === "none") return null;
 
   return (
     <View style={[styles.wrap, { paddingTop: TOP_MENU_MARGIN, paddingBottom: insets.bottom }]}>
@@ -264,8 +266,15 @@ export default function CustomTabBar(props) {
                 canPreventDefault: true,
               });
 
-              if (!isFocused && !event.defaultPrevented) {
-                navigation.navigate(route.name);
+              if (!event.defaultPrevented) {
+                if (route.name === "Mais") {
+                  navigation.navigate("Mais", { screen: "MoreHome" });
+                  return;
+                }
+
+                if (!isFocused) {
+                  navigation.navigate(route.name);
+                }
               }
             };
 
