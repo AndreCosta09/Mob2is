@@ -35,7 +35,11 @@ export default function PoiCard({ item, index, onPress }) {
         </View>
 
         <View style={S.footer}>
-          <Text style={S.title}>{item.title}</Text>
+          <View style={S.titleWrap}>
+            <Text style={S.title} numberOfLines={2}>
+              {item.title}
+            </Text>
+          </View>
           <View style={S.badge}>
             <Text style={S.badgeTxt}>{String(item.rating ?? 0).replace(".", ",")}</Text>
           </View>
@@ -59,8 +63,35 @@ const S = StyleSheet.create({
   },
   imgWrap: { height: 190, backgroundColor: "#DDE6F0" },
   img: { width: "100%", height: "100%" },
-  footer: { padding: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontWeight: "900", color: C.text, fontSize: 14 },
-  badge: { backgroundColor: C.bg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  footer: {
+    minHeight: 58,
+    paddingVertical: 12,
+    paddingLeft: 14,
+    paddingRight: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  titleWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  title: {
+    fontWeight: "900",
+    color: C.text,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  badge: {
+    flexShrink: 0,
+    minWidth: 42,
+    minHeight: 34,
+    backgroundColor: C.bg,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   badgeTxt: { fontWeight: "900", color: C.text },
 });

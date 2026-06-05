@@ -104,6 +104,7 @@ export default function ExploreSearchPanel({
   const [heardText, setHeardText] = useState("");
   const [searchErrorMessage, setSearchErrorMessage] = useState("");
   const finishVoiceWithTextRef = useRef(null);
+  const voiceFinishingRef = useRef(false);
   const sheetDragStartYRef = useRef(0);
   const sheetTranslateY = useRef(new Animated.Value(0)).current;
 
@@ -152,10 +153,46 @@ export default function ExploreSearchPanel({
     load(q);
   }, [load, open, q, userCoord]);
 
-  async function stopVoice() {
+  const attachVoiceListeners = useCallback(() => {
+    Voice.onSpeechResults = (event) => {
+      const text = event?.value?.[0] ?? "";
+      if (!text || voiceFinishingRef.current) return;
+      voiceFinishingRef.current = true;
+      setHeardText(text);
+      finishVoiceWithTextRef.current?.(text);
+    };
+
+    Voice.onSpeechPartialResults = (event) => {
+      const text = event?.value?.[0] ?? "";
+      if (text) setHeardText(text);
+    };
+
+    Voice.onSpeechError = () => {
+      voiceFinishingRef.current = false;
+      setListening(false);
+    };
+
+    Voice.onSpeechEnd = () => {
+      setListening(false);
+    };
+  }, []);
+
+  async function resetVoiceEngine() {
     try {
-      await Voice.stop();
+      await Voice.cancel();
     } catch {}
+    try {
+      await Voice.destroy();
+    } catch {}
+    try {
+      Voice.removeAllListeners();
+    } catch {}
+    attachVoiceListeners();
+  }
+
+  async function stopVoice() {
+    await resetVoiceEngine();
+    voiceFinishingRef.current = false;
     setListening(false);
   }
 
@@ -186,24 +223,14 @@ export default function ExploreSearchPanel({
   finishVoiceWithTextRef.current = finishVoiceWithText;
 
   useEffect(() => {
-    Voice.onSpeechResults = (event) => {
-      const text = event?.value?.[0] ?? "";
-      if (!text) return;
-      setHeardText(text);
-      finishVoiceWithTextRef.current?.(text);
-    };
-
-    Voice.onSpeechError = () => {
-      try {
-        Voice.stop();
-      } catch {}
-      setListening(false);
-    };
+    attachVoiceListeners();
 
     return () => {
-      Voice.destroy().then(Voice.removeAllListeners).catch(() => {});
+      Voice.destroy()
+        .then(() => Voice.removeAllListeners())
+        .catch(() => {});
     };
-  }, []);
+  }, [attachVoiceListeners]);
 
   const openModal = async () => {
     setOpen(true);
@@ -226,16 +253,22 @@ export default function ExploreSearchPanel({
   };
 
   const startVoice = async () => {
+    if (listening) return;
+
     const ok = await ensureMicPermission();
     if (!ok) return;
 
     setHeardText("");
+    setSearchErrorMessage("");
     setListening(true);
+    voiceFinishingRef.current = false;
 
     try {
+      await resetVoiceEngine();
       const locale = i18n.language?.startsWith("en") ? "en-US" : "pt-PT";
       await Voice.start(locale);
     } catch {
+      voiceFinishingRef.current = false;
       setListening(false);
     }
   };
@@ -402,7 +435,7 @@ export default function ExploreSearchPanel({
 
           <FlatList
             data={results}
-            keyExtractor={(item) => String(item.id)}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             keyboardShouldPersistTaps="handled"
             ListEmptyComponent={
               searchErrorMessage ? (
