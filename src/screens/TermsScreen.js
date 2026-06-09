@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   Alert,
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,29 +21,45 @@ const C = {
   blue: "#1579B3",
 };
 
-const PRIVACY_POLICY_URL =
-  "https://ajuda.sapo.pt/pt-pt/security/politica-de-privacidade";
-const COOKIE_POLICY_URL = "https://ajuda.sapo.pt/politica-de-cookies-9682";
-const TERMS_PDF_SOURCE = Platform.select({
-  android: { uri: "bundle-assets://legal/termos_e_condicoes.pdf" },
-  default: require("../assets/legal/termos_e_condicoes.pdf"),
-});
+const LEGAL_DOCS = {
+  terms: {
+    titleKey: "settings.terms_title",
+    source: Platform.select({
+      android: { uri: "bundle-assets://legal/termos_e_condicoes.pdf" },
+      default: require("../assets/legal/termos_e_condicoes.pdf"),
+    }),
+  },
+  privacy: {
+    titleKey: "settings.privacy_policy",
+    source: Platform.select({
+      android: { uri: "bundle-assets://legal/Politica_de_Privacidade.pdf" },
+      default: require("../assets/legal/Politica_de_Privacidade.pdf"),
+    }),
+  },
+  cookies: {
+    titleKey: "settings.cookies_policy",
+    source: Platform.select({
+      android: { uri: "bundle-assets://legal/Politica_de_Cookies.pdf" },
+      default: require("../assets/legal/Politica_de_Cookies.pdf"),
+    }),
+  },
+};
+
+const LEGAL_DOC_ORDER = ["terms", "privacy", "cookies"];
 
 export default function TermsScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
+  const [currentDocKey, setCurrentDocKey] = useState("terms");
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(0);
+  const currentDoc = LEGAL_DOCS[currentDocKey] ?? LEGAL_DOCS.terms;
+  const actionDocKeys = LEGAL_DOC_ORDER.filter((key) => key !== currentDocKey);
 
-  const openExternalLink = async (url) => {
-    try {
-      await Linking.openURL(url);
-    } catch {
-      Alert.alert(
-        t("settings.link_error_title"),
-        t("settings.link_error_message")
-      );
-    }
+  const switchDocument = (nextDocKey) => {
+    setCurrentDocKey(nextDocKey);
+    setPage(1);
+    setPages(0);
   };
 
   return (
@@ -53,7 +68,7 @@ export default function TermsScreen({ navigation }) {
         <BackButton onPress={() => navigation.goBack()} />
 
         <View style={styles.titleWrap}>
-          <Text style={styles.title}>{t("more.items.terms.title")}</Text>
+          <Text style={styles.title}>{t(currentDoc.titleKey)}</Text>
           <Text style={styles.subtitle}>
             {pages ? `${page}/${pages}` : t("more.items.terms.subtitle")}
           </Text>
@@ -66,25 +81,22 @@ export default function TermsScreen({ navigation }) {
         <Text style={styles.linksTitle}>{t("settings.terms_links_intro")}</Text>
 
         <View style={styles.linksRow}>
-          <Pressable
-            onPress={() => openExternalLink(PRIVACY_POLICY_URL)}
-            style={styles.linkBtn}
-          >
-            <Text style={styles.linkBtnText}>{t("settings.privacy_policy")}</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => openExternalLink(COOKIE_POLICY_URL)}
-            style={styles.linkBtn}
-          >
-            <Text style={styles.linkBtnText}>{t("settings.cookies_policy")}</Text>
-          </Pressable>
+          {actionDocKeys.map((docKey) => (
+            <Pressable
+              key={docKey}
+              onPress={() => switchDocument(docKey)}
+              style={styles.linkBtn}
+            >
+              <Text style={styles.linkBtnText}>{t(LEGAL_DOCS[docKey].titleKey)}</Text>
+            </Pressable>
+          ))}
         </View>
       </View>
 
       <View style={styles.pdfWrap}>
         <Pdf
-          source={TERMS_PDF_SOURCE}
+          key={currentDocKey}
+          source={currentDoc.source}
           style={styles.pdf}
           trustAllCerts={false}
           enablePaging={false}
